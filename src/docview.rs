@@ -302,6 +302,9 @@ pub fn on_click(mx: i32, my: i32) -> bool {
 
 /// Au-delà, on n'ouvre même pas le fichier (garde-fou mémoire).
 const MAX_OPEN: usize = 24 * 1024 * 1024;
+/// Idem mais pour les images : elles sont toujours affichées (réduites
+/// autant qu'il faut), il faut juste pouvoir charger le fichier.
+const MAX_OPEN_IMG: usize = 160 * 1024 * 1024;
 const MSG_BIG: &str = "fichier trop volumineux pour etre ouvert";
 const MSG_NOPE: &str = "affichage non pris en compte";
 
@@ -320,10 +323,13 @@ fn load_content() {
             VIEW = View::Message;
         };
 
+        let is_img = crate::image::kind_of(&name).is_some();
+        let cap = if is_img { MAX_OPEN_IMG } else { MAX_OPEN };
+
         // 1) garde-fou taille (fichiers hôte ; les fichiers RAM sont <= FCAP)
         if host {
             if let Some(sz) = p9::size(&full_path(&name)) {
-                if sz as usize > MAX_OPEN {
+                if sz as usize > cap {
                     crate::serial_println!("[doc] {} : {} o -> trop gros", name, sz);
                     return msg(MSG_BIG);
                 }
@@ -332,7 +338,7 @@ fn load_content() {
 
         // 2) lecture (plafonnée : sécurité si getattr a menti / fs local)
         let full = if host {
-            match p9::read_file_max(&full_path(&name), MAX_OPEN) {
+            match p9::read_file_max(&full_path(&name), cap) {
                 Some(d) => d,
                 None => return msg(MSG_BIG),
             }

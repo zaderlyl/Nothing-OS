@@ -92,11 +92,14 @@ pub fn decode_fit(
     max_w: i32,
     max_h: i32,
 ) -> Result<Bitmap, &'static str> {
-    const MAXPX: usize = 24_000_000; // ~6000×4000 : couvre les photos de tel.
+    // plafond de décodage : au-delà, le tampon décompressé ne tient plus
+    // en mémoire. 80 Mpx (≈ 9000×9000) couvre toutes les images réelles ;
+    // ensuite on réduit autant que nécessaire pour tenir dans le panneau.
+    const MAXPX: usize = 60_000_000;
     let opts = DecoderOptions::default()
         .png_set_strip_to_8bit(true)
-        .set_max_width(8000)
-        .set_max_height(8000);
+        .set_max_width(20000)
+        .set_max_height(20000);
 
     let (sw, sh, ch, data): (usize, usize, usize, Vec<u8>) = match kind {
         Kind::Png => {
@@ -139,19 +142,43 @@ pub fn decode_fit(
         dh = max_h;
     }
 
-    let mut px = Vec::with_capacity((dw * dh) as usize);
-    for y in 0..dh {
-        let sy = (y as usize * sh / dh as usize).min(sh - 1);
-        for x in 0..dw {
-            let sx = (x as usize * sw / dw as usize).min(sw - 1);
-            let o = (sy * sw + sx) * ch;
-            let (r, g, b) = if ch >= 3 {
-                (data[o] as i32, data[o + 1] as i32, data[o + 2] as i32)
-            } else {
-                let v = data[o] as i32;
-                (v, v, v)
-            };
-            px.push(quant(r, g, b, x, y));
+    // réduction par moyenne de bloc (box filter) : chaque pixel de sortie
+    // = moyenne de la zone source qu'il couvre. On « compresse » ainsi
+    // l'image autant que nécessaire sans crénelage.
+    let (dwu, dhu) = (dw as usize, dh as usize);
+    let mut px = Vec::with_capacity(dwu * dhu);
+    for y in 0..dhu {
+        let y0 = y * sh / dhu;
+        let y1 = ((y + 1) * sh / dhu).max(y0 + 1).min(sh);
+        for x in 0..dwu {
+            let x0 = x * sw / dwu;
+            let x1 = ((x + 1) * sw / dwu).max(x0 + 1).min(sw);
+            let (mut sr, mut sg, mut sb, mut n) = (0u64, 0u64, 0u64, 0u64);
+            for yy in y0..y1 {
+                let base = yy * sw;
+                for xx in x0..x1 {
+                    let o = (base + xx) * ch;
+                    if ch >= 3 {
+                        sr += data[o] as u64;
+                        sg += data[o + 1] as u64;
+                        sb += data[o + 2] as u64;
+                    } else {
+                        let v = data[o] as u64;
+                        sr += v;
+                        sg += v;
+                        sb += v;
+                    }
+                    n += 1;
+                }
+            }
+            let n = n.max(1);
+            px.push(quant(
+                (sr / n) as i32,
+                (sg / n) as i32,
+                (sb / n) as i32,
+                x as i32,
+                y as i32,
+            ));
         }
     }
 

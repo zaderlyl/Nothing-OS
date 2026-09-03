@@ -6,15 +6,16 @@
 //! `linked_list_allocator`) : gère la libération et la réutilisation,
 //! contrairement à un simple bump.
 //!
-//! 160 Mio : il faut de la marge pour décoder une image (un PNG/JPEG
-//! décompressé peut peser ~100 Mio le temps de le réduire pour l'aperçu
-//! — voir `src/image.rs`). Le Makefile démarre QEMU avec `-m 1G`.
+//! 512 Mio : il faut beaucoup de marge pour décoder une image quelle que
+//! soit sa taille (un PNG de 80 Mpx décompressé pèse ~320 Mio le temps
+//! d'être réduit — voir `src/image.rs`). Le Makefile démarre QEMU avec
+//! `-m 1G` ; le tas reste dans le 1er Gio identity-mappé par le boot.
 
 use core::alloc::Layout;
 
 use linked_list_allocator::LockedHeap;
 
-const HEAP_SIZE: usize = 160 * 1024 * 1024;
+const HEAP_SIZE: usize = 512 * 1024 * 1024;
 
 static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
 
