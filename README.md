@@ -98,18 +98,16 @@ Silicon.
 ```bash
 # 1. Outils (Homebrew)
 brew install rustup nasm qemu lld     # lld fournit ld.lld (éditeur de liens)
-rustup-init -y                        # installe la toolchain Rust stable
+rustup default stable                 # installe la toolchain Rust stable
 rustup target add x86_64-unknown-linux-gnu   # core/std x86_64 précompilés
 
 # 2. Construire + lancer
-make run            # fenêtre QEMU (VGA) : l'accueil "Asti"
+make run            # fenêtre QEMU : Asti en haut à droite
 make run-headless   # sans fenêtre, traces de boot sur le port série
 ```
 
-> Si `cargo` n'est pas dans le `PATH` après `rustup-init` (paquet
-> Homebrew `rustup`), ajoute
-> `export PATH="$HOME/.cargo/bin:$PATH"` à ton shell — ou lance
-> `rustup default stable` une fois.
+> Le `Makefile` retrouve `cargo`/`rustc` via `rustup` même si le paquet
+> Homebrew `rustup` ne les met pas dans le `PATH`.
 
 Sur un Mac ARM, QEMU émule un x86_64 complet (plus lent qu'en natif, mais
 imperceptible pour un noyau aussi petit).

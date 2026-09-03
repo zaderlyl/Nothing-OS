@@ -21,8 +21,15 @@
 # `?=`) ; une affectation en ligne de commande reste prioritaire.
 ASM        := nasm
 LD         := ld.lld
-CARGO      := cargo
 QEMU       := qemu-system-x86_64
+
+# `cargo` : le paquet Homebrew `rustup` n'installe pas de proxies dans
+# ~/.cargo/bin. On demande son chemin à rustup ; à défaut `cargo` tel
+# quel (installation classique via rustup.rs). Il faut aussi que `rustc`
+# (juste à côté) soit dans le PATH → CARGO_ENV l'y ajoute au besoin.
+RUSTUP_CARGO := $(shell rustup which cargo 2>/dev/null)
+CARGO        := $(if $(RUSTUP_CARGO),$(RUSTUP_CARGO),cargo)
+CARGO_ENV    := $(if $(RUSTUP_CARGO),PATH="$(dir $(RUSTUP_CARGO)):$$PATH",)
 
 # Cible Rust : on compile pour x86_64 Linux (core/std précompilés, dispo
 # via `rustup target add x86_64-unknown-linux-gnu`) même sur un Mac ARM.
@@ -43,7 +50,7 @@ QEMU_FLAGS := -no-reboot -no-shutdown
 all: $(KERNEL_BIN)
 
 kernel:
-	$(CARGO) build --release --target $(TARGET)
+	$(CARGO_ENV) $(CARGO) build --release --target $(TARGET)
 
 $(BUILD_DIR)/long_mode.o: $(BOOT_DIR)/long_mode.asm
 	@mkdir -p $(BUILD_DIR)
@@ -89,4 +96,4 @@ run-iso: $(ISO)
 
 clean:
 	rm -rf $(BUILD_DIR) $(KERNEL_BIN) $(KERNEL_MB) $(ISO) isodir
-	$(CARGO) clean
+	$(CARGO_ENV) $(CARGO) clean
