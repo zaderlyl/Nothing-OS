@@ -35,6 +35,7 @@ mod image;
 mod interrupts;
 mod kbd;
 mod mouse;
+mod mp3;
 mod p9;
 mod pci;
 mod port;
@@ -45,6 +46,7 @@ mod term;
 mod time;
 mod vga;
 mod virtio;
+mod wav;
 mod win;
 
 use core::panic::PanicInfo;

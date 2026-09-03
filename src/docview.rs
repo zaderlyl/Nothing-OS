@@ -21,7 +21,17 @@ const W: i32 = fb::WIDTH as i32;
 const H: i32 = fb::HEIGHT as i32;
 
 const PW: i32 = 780; // largeur d'un panneau (~demi-écran)
-const RIGHT_X0: i32 = W - PW; // 1140 : bord gauche du panneau droit sorti
+/// Largeur du panneau droit : compact pour l'audio, sinon demi-écran.
+fn rpw() -> i32 {
+    if unsafe { VIEW == View::Audio } {
+        520
+    } else {
+        PW
+    }
+}
+fn right_x0() -> i32 {
+    W - rpw()
+}
 const PADX: i32 = 28;
 const HEADER_H: i32 = 100;
 const ROW_H: i32 = 46;
@@ -52,6 +62,7 @@ static mut CWD: String = String::new();
 enum View {
     Text,
     Image,
+    Audio,   // lecteur audio compact (mp3 / wav)
     Message, // erreur / format non géré → VIEW_MSG
 }
 static mut VIEW: View = View::Text;
@@ -72,10 +83,10 @@ pub fn left_covering() -> bool {
 
 /// Ouvre la liste des documents (revient à la racine du partage).
 pub fn open_list() {
+    close_right();
     unsafe {
         CWD = String::new();
         L_ON = true;
-        R_ON = false;
     }
     relist();
 }
@@ -181,8 +192,16 @@ fn go_crumb(depth: usize) {
 }
 
 pub fn close_all() {
+    close_right();
     unsafe {
         L_ON = false;
+    }
+}
+
+/// Ferme le panneau droit (et coupe l'audio s'il y en avait).
+fn close_right() {
+    crate::ac97::stop();
+    unsafe {
         R_ON = false;
     }
 }
@@ -203,10 +222,10 @@ fn approach(cur: f32, target: f32, dt: f32, speed: f32) -> f32 {
 }
 
 pub fn update(dt: f32) {
+    if unsafe { !L_ON && R_ON } {
+        close_right();
+    }
     unsafe {
-        if !L_ON {
-            R_ON = false;
-        }
         L_OUT = approach(L_OUT, if L_ON { 1.0 } else { 0.0 }, dt, 11.0).clamp(0.0, 1.0);
         R_OUT = approach(R_OUT, if R_ON { 1.0 } else { 0.0 }, dt, 11.0).clamp(0.0, 1.0);
         clamp_scrolls();
@@ -221,7 +240,7 @@ fn view_content_h() -> i32 {
     unsafe {
         match VIEW {
             View::Image => IMG_H + 24,
-            View::Message => 0,
+            View::Message | View::Audio => 0,
             View::Text => wrapped_lines(&CONTENT) as i32 * (16 + 6),
         }
     }
@@ -241,7 +260,7 @@ pub fn on_scroll(mx: i32, my: i32, delta: i32) {
     let _ = my;
     let step = delta * 40;
     unsafe {
-        if R_OUT > 0.5 && mx >= RIGHT_X0 {
+        if R_OUT > 0.5 && mx >= right_x0() {
             R_SCROLL -= step;
         } else if L_OUT > 0.5 && mx < PW {
             L_SCROLL -= step;
@@ -256,8 +275,11 @@ pub fn on_click(mx: i32, my: i32) -> bool {
         return false;
     }
     unsafe {
-        // panneau droit visible et clic dedans → on garde le clic
-        if R_OUT > 0.5 && mx >= RIGHT_X0 {
+        // panneau droit visible et clic dedans
+        if R_OUT > 0.5 && mx >= right_x0() {
+            if VIEW == View::Audio {
+                audio_click(mx, my);
+            }
             return true;
         }
         // panneau gauche visible et clic dedans
@@ -292,7 +314,7 @@ pub fn on_click(mx: i32, my: i32) -> bool {
         }
         // clic en dehors → on retire le panneau du dessus
         if R_ON {
-            R_ON = false;
+            close_right();
         } else if L_ON {
             L_ON = false;
         }
@@ -305,10 +327,29 @@ const MAX_OPEN: usize = 24 * 1024 * 1024;
 /// Idem mais pour les images : elles sont toujours affichées (réduites
 /// autant qu'il faut), il faut juste pouvoir charger le fichier.
 const MAX_OPEN_IMG: usize = 160 * 1024 * 1024;
+/// Limite de lecture pour l'audio (un mp3/wav de plusieurs minutes).
+const MAX_OPEN_SND: usize = 96 * 1024 * 1024;
 const MSG_BIG: &str = "fichier trop volumineux pour etre ouvert";
 const MSG_NOPE: &str = "affichage non pris en compte";
+const MSG_VIDEO: &str = "lecture video indisponible (pas de decodeur H.264)";
+
+fn ext_is(name: &str, list: &[&str]) -> bool {
+    let e = match name.rsplit('.').next() {
+        Some(e) => e,
+        None => return false,
+    };
+    list.iter()
+        .any(|t| e.len() == t.len() && e.bytes().zip(t.bytes()).all(|(c, d)| c.to_ascii_lowercase() == d))
+}
+fn is_audio(name: &str) -> bool {
+    ext_is(name, &["mp3", "wav", "wave"])
+}
+fn is_video(name: &str) -> bool {
+    ext_is(name, &["mp4", "mov", "m4v", "avi", "mkv", "webm", "wmv", "flv", "mpg", "mpeg"])
+}
 
 fn load_content() {
+    crate::ac97::stop();
     unsafe {
         let e = &ENTRIES[SEL as usize];
         let name = e.name.clone();
@@ -323,8 +364,20 @@ fn load_content() {
             VIEW = View::Message;
         };
 
+        if is_video(&name) {
+            crate::serial_println!("[doc] {} : video non geree", name);
+            return msg(MSG_VIDEO);
+        }
+
         let is_img = crate::image::kind_of(&name).is_some();
-        let cap = if is_img { MAX_OPEN_IMG } else { MAX_OPEN };
+        let is_snd = is_audio(&name);
+        let cap = if is_img {
+            MAX_OPEN_IMG
+        } else if is_snd {
+            MAX_OPEN_SND
+        } else {
+            MAX_OPEN
+        };
 
         // 1) garde-fou taille (fichiers hôte ; les fichiers RAM sont <= FCAP)
         if host {
@@ -364,6 +417,19 @@ fn load_content() {
                 Err(e) if e.contains("trop grande") => msg(MSG_BIG),
                 Err(_) => msg(MSG_NOPE),
             }
+        } else if is_snd {
+            match decode_audio(&name, &full) {
+                Some((pcm, rate)) => {
+                    let secs = pcm.len() as f32 / 2.0 / rate as f32;
+                    crate::ac97::load(pcm, rate);
+                    if crate::ac97::present() {
+                        crate::ac97::play();
+                    }
+                    VIEW = View::Audio;
+                    crate::serial_println!("[doc] audio {} : {:.0}s @ {}Hz", name, secs, rate);
+                }
+                None => msg(MSG_NOPE),
+            }
         } else if ext_unsupported(&name) || looks_binary(&full) {
             crate::serial_println!("[doc] {} : non affichable", name);
             msg(MSG_NOPE);
@@ -392,6 +458,20 @@ fn ext_unsupported(name: &str) -> bool {
     ];
     LIST.iter()
         .any(|t| e.len() == t.len() && e.bytes().zip(t.bytes()).all(|(c, d)| c.to_ascii_lowercase() == d))
+}
+
+/// Décode un fichier audio (wav ou mp3) en PCM stéréo + débit.
+fn decode_audio(name: &str, data: &[u8]) -> Option<(Vec<i16>, u32)> {
+    if crate::wav::is_wav(data) {
+        let p = crate::wav::decode(data)?;
+        return Some((p.samples, p.rate));
+    }
+    if ext_is(name, &["mp3"])
+        || (data.len() > 3 && (&data[..3] == b"ID3" || (data[0] == 0xff && data[1] & 0xe0 == 0xe0)))
+    {
+        return crate::mp3::decode(data);
+    }
+    None
 }
 
 /// Le contenu ressemble-t-il à du binaire (donc illisible en texte) ?
@@ -554,16 +634,18 @@ fn itoa(mut v: u32, buf: &mut [u8]) -> usize {
 }
 
 fn draw_right(rx: i32) {
-    fb::fill_rect(rx, 0, PW, H, P_CODE_BG);
+    let w = rpw();
+    fb::fill_rect(rx, 0, w, H, P_CODE_BG);
     fb::fill_rect(rx, 0, 3, H, P_FRAME);
 
     match unsafe { &VIEW } {
         View::Image => draw_image(rx),
+        View::Audio => draw_audio(rx),
         View::Message => {
             let msg = unsafe { &VIEW_MSG };
-            let w = font::width_scaled(msg, 2);
-            font::draw_str_scaled(rx + (PW - w) / 2, H / 2 - 10, msg, P_DIM, 2);
-            dots::draw_centered(dots::QUESTION, rx, H / 2 + 40, PW, 80, 6, P_DIM, P_TITLE_HI);
+            let tw = font::width_scaled(msg, 2);
+            font::draw_str_scaled(rx + (w - tw) / 2, H / 2 - 10, msg, P_DIM, 2);
+            dots::draw_centered(dots::QUESTION, rx, H / 2 + 40, w, 80, 6, P_DIM, P_TITLE_HI);
         }
         View::Text => {
             let cols = ((PW - 2 * PADX) / 16).max(1) as usize;
@@ -595,14 +677,130 @@ fn draw_right(rx: i32) {
     }
 
     // en-tête (par-dessus le contenu)
-    fb::fill_rect(rx, 0, PW, HEADER_H, P_TITLE_HI);
-    fb::fill_rect(rx, HEADER_H - 2, PW, 2, P_FRAME);
-    dots::draw(dots::FILE, rx + PADX, 26, 4, P_TEXT, P_DIM);
+    fb::fill_rect(rx, 0, w, HEADER_H, P_TITLE_HI);
+    fb::fill_rect(rx, HEADER_H - 2, w, 2, P_FRAME);
+    let hg = if unsafe { VIEW == View::Audio } {
+        dots::NOTE
+    } else {
+        dots::FILE
+    };
+    dots::draw(hg, rx + PADX, 26, 4, P_TEXT, P_DIM);
     let mut buf = [0u8; 44];
-    let name = trunc(unsafe { &CONTENT_NAME }, 38, &mut buf);
+    let name = trunc(unsafe { &CONTENT_NAME }, 34, &mut buf);
     font::draw_str_scaled(rx + PADX + 64, 30, name, P_TEXT, 3);
 
     scrollbar(rx + 2, view_content_h(), unsafe { R_SCROLL });
+}
+
+// --- lecteur audio compact --------------------------------------------
+
+fn secs_str(s: f32, out: &mut [u8]) -> usize {
+    let t = if s < 0.0 { 0 } else { s as u32 };
+    let (m, sec) = (t / 60, t % 60);
+    let mut n = itoa(m, out);
+    if n < out.len() {
+        out[n] = b':';
+        n += 1;
+    }
+    if n < out.len() {
+        out[n] = b'0' + (sec / 10) as u8;
+        n += 1;
+    }
+    if n < out.len() {
+        out[n] = b'0' + (sec % 10) as u8;
+        n += 1;
+    }
+    n
+}
+
+/// Rectangle du lecteur audio à partir du bord gauche `x0` du panneau.
+fn audio_card(x0: i32) -> (i32, i32, i32, i32) {
+    let (cw, ch) = (440, 300);
+    // un peu sous le centre pour dégager Asti (coin haut-droite)
+    (x0 + (rpw() - cw) / 2, H / 2 - ch / 2 + 70, cw, ch)
+}
+
+const SPEEDS: [(f32, &str); 3] = [(1.0, "x1"), (1.5, "x1.5"), (2.0, "x2")];
+
+fn speed_pill(cx: i32, cy: i32, i: usize) -> (i32, i32, i32, i32) {
+    let w = 80;
+    (cx + 30 + i as i32 * (w + 14), cy + 244, w, 34)
+}
+
+fn draw_audio(rx: i32) {
+    let (cx, cy, cw, _ch) = audio_card(rx);
+
+    // pochette
+    fb::fill_rect(cx - 2, cy - 2, cw + 4, 304, P_FRAME);
+    fb::fill_rect(cx, cy, cw, 300, P_TITLE_HI);
+    dots::draw_centered(dots::NOTE, cx, cy + 18, cw, 44, 4, P_ACCENT, P_TEXT);
+
+    // bouton lecture / pause
+    let (bx, by) = (cx + cw / 2, cy + 118);
+    fb::fill_circle(bx as f32, by as f32, 36.0, P_ACCENT);
+    fb::fill_circle(bx as f32, by as f32, 32.0, P_TITLE_HI);
+    let g = if crate::ac97::playing() {
+        dots::PAUSE
+    } else {
+        dots::PLAY
+    };
+    dots::draw_centered(g, bx - 22, by - 22, 44, 44, 4, P_ACCENT, P_ACCENT);
+
+    // barre de progression
+    let (px, py, pw) = (cx + 30, cy + 186, cw - 60);
+    let prog = crate::ac97::progress();
+    fb::fill_rect(px, py, pw, 8, P_FRAME);
+    fb::fill_rect(px, py, (pw as f32 * prog) as i32, 8, P_ACCENT);
+    let kx = px + (pw as f32 * prog) as i32;
+    fb::fill_rect(kx - 3, py - 5, 6, 18, P_TEXT);
+
+    let dur = crate::ac97::duration();
+    let mut a = [0u8; 8];
+    let mut b = [0u8; 8];
+    let na = secs_str(dur * prog, &mut a);
+    let nb = secs_str(dur, &mut b);
+    font::draw_str_scaled(px, py + 18, core::str::from_utf8(&a[..na]).unwrap_or(""), P_DIM, 1);
+    let wr = font::width_scaled(core::str::from_utf8(&b[..nb]).unwrap_or(""), 1);
+    font::draw_str_scaled(px + pw - wr, py + 18, core::str::from_utf8(&b[..nb]).unwrap_or(""), P_DIM, 1);
+
+    // vitesses
+    let cur = crate::ac97::speed();
+    for (i, (v, lbl)) in SPEEDS.iter().enumerate() {
+        let (sx, sy, sw, sh) = speed_pill(cx, cy, i);
+        let on = (cur - v).abs() < 0.05;
+        fb::fill_rect(sx, sy, sw, sh, if on { P_ACCENT } else { P_FRAME });
+        let tw = font::width_scaled(lbl, 2);
+        font::draw_str_scaled(
+            sx + (sw - tw) / 2,
+            sy + 9,
+            lbl,
+            if on { P_TITLE_HI } else { P_TEXT },
+            2,
+        );
+    }
+}
+
+fn audio_click(mx: i32, my: i32) {
+    let x0 = right_x0();
+    let (cx, cy, cw, _ch) = audio_card(x0);
+
+    let (bx, by) = (cx + cw / 2, cy + 118);
+    if (mx - bx).pow(2) + (my - by).pow(2) < 42 * 42 {
+        crate::ac97::toggle();
+        return;
+    }
+    let (px, py, pw) = (cx + 30, cy + 186, cw - 60);
+    if mx >= px && mx <= px + pw && (my - (py + 4)).abs() < 16 {
+        crate::ac97::seek((mx - px) as f32 / pw as f32);
+        return;
+    }
+    for (i, (v, _)) in SPEEDS.iter().enumerate() {
+        let (sx, sy, sw, sh) = speed_pill(cx, cy, i);
+        if mx >= sx && mx <= sx + sw && my >= sy && my <= sy + sh {
+            crate::ac97::set_speed(*v);
+            return;
+        }
+    }
 }
 
 fn draw_image(rx: i32) {
