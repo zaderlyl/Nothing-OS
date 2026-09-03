@@ -421,6 +421,7 @@ pub enum Pose {
     Grumpy,
     // humeurs "application" (tenues tant que la fenêtre est au 1er plan)
     AppCode,
+    AppTerm,
     AppChat,
     AppGit,
     AppWeb,
@@ -702,6 +703,21 @@ pub fn draw_creature(cv: &mut Canvas, s: &State, t: f32) {
                 cy += sinf(t * 4.2) * 0.14;
                 tilt = sinf(t * 0.4) * 0.02;
             }
+            // terminal : ambiance "matrix" — regard qui scanne les lignes,
+            // clignements vifs, légère oscillation (scène 'matrix' de PC Pet).
+            Pose::AppTerm => {
+                eye = if (t * 3.0) as i32 % 5 == 0 {
+                    EyeStyle::Wide
+                } else {
+                    EyeStyle::Squint
+                };
+                mouth = Mouth::Line;
+                look_h = (((t * 1.1) % 2.0) - 1.0) * 2.8; // balayage gauche/droite
+                look_v = 0.4;
+                cy += sinf(t * 6.0) * 0.1;
+                tilt = sinf(t * 0.5) * 0.02;
+                ex.push(Extra::Crumb(t * 0.6));
+            }
             Pose::AppChat => {
                 eye = EyeStyle::Arc;
                 mouth = Mouth::Smile;
@@ -785,6 +801,7 @@ struct TintRgb {
 pub enum Tint {
     Null,
     Code,
+    Matrix,
     Chat,
     Git,
     Web,
@@ -799,13 +816,21 @@ fn tint_rgb(t: Tint) -> TintRgb {
             lit: [233, 239, 253],
             glow: [200, 220, 255],
         },
-        // VS Code : bleu
+        // éditeur : bleu (VS Code)
         Tint::Code => TintRgb {
             bg: [10, 20, 32],
             off: [0, 122, 204],
             off_a: 0.16,
             lit: [170, 210, 255],
             glow: [0, 122, 204],
+        },
+        // terminal : vert "matrix"
+        Tint::Matrix => TintRgb {
+            bg: [6, 16, 8],
+            off: [80, 220, 120],
+            off_a: 0.12,
+            lit: [180, 255, 190],
+            glow: [90, 255, 140],
         },
         // Discord : bleu-violet
         Tint::Chat => TintRgb {

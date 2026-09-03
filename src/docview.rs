@@ -15,7 +15,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::win::{P_ACCENT, P_CODE_BG, P_DIM, P_FRAME, P_STR, P_TEXT, P_TITLE_HI};
-use crate::{dots, fb, font, fs, hostfs, p9};
+use crate::{dots, fb, font, fs, p9};
 
 const W: i32 = fb::WIDTH as i32;
 const H: i32 = fb::HEIGHT as i32;
@@ -44,6 +44,8 @@ static mut R_SCROLL: i32 = 0;
 static mut SEL: i32 = -1;
 static mut CONTENT: Vec<u8> = Vec::new();
 static mut CONTENT_NAME: String = String::new();
+/// Sous-dossier courant dans le partage Mac ("" = racine).
+static mut CWD: String = String::new();
 
 pub fn active() -> bool {
     unsafe { L_ON || R_ON || L_OUT > 0.01 || R_OUT > 0.01 }
@@ -55,26 +57,46 @@ pub fn left_covering() -> bool {
     unsafe { L_OUT > 0.04 }
 }
 
-/// Ouvre (ou recharge) la liste des documents.
+/// Ouvre la liste des documents (revient à la racine du partage).
 pub fn open_list() {
-    hostfs::refresh_dir();
+    unsafe {
+        CWD = String::new();
+        L_ON = true;
+        R_ON = false;
+    }
+    relist();
+}
+
+/// (Re)construit la liste pour le dossier courant `CWD`.
+fn relist() {
+    let cwd = unsafe { CWD.clone() };
     let mut v: Vec<Ent> = Vec::new();
-    if hostfs::have_dir() {
-        hostfs::each_dir(|name, dir| {
-            v.push(Ent {
-                name: String::from(name),
-                dir,
-                host: true,
-            });
+
+    if p9::present() {
+        if let Some(items) = p9::list(&cwd) {
+            for e in items {
+                v.push(Ent {
+                    name: e.name,
+                    dir: e.kind == p9::DT_DIR,
+                    host: true,
+                });
+            }
+        }
+    }
+    // les fichiers RAM (pas les dossiers : le fs local est plat) sont
+    // montrés seulement à la racine
+    if cwd.is_empty() {
+        fs::each(|_, f| {
+            if !f.is_dir() {
+                v.push(Ent {
+                    name: String::from(f.name()),
+                    dir: false,
+                    host: false,
+                });
+            }
         });
     }
-    fs::each(|_, f| {
-        v.push(Ent {
-            name: String::from(f.name()),
-            dir: f.is_dir(),
-            host: false,
-        });
-    });
+
     // dossiers d'abord, puis ordre alphabétique (insensible à la casse)
     v.sort_by(|a, b| match (a.dir, b.dir) {
         (true, false) => core::cmp::Ordering::Less,
@@ -83,12 +105,66 @@ pub fn open_list() {
     });
     unsafe {
         ENTRIES = v;
-        L_ON = true;
         L_SCROLL = 0;
         SEL = -1;
-        R_ON = false;
+        clamp_scrolls();
     }
-    crate::serial_println!("[doc] liste : {} entree(s)", unsafe { ENTRIES.len() });
+    crate::serial_println!(
+        "[doc] {} : {} entree(s)",
+        if cwd.is_empty() { "racine" } else { &cwd },
+        unsafe { ENTRIES.len() }
+    );
+}
+
+/// Descend dans un sous-dossier du partage.
+fn enter_dir(name: &str) {
+    unsafe {
+        if !CWD.is_empty() {
+            CWD.push('/');
+        }
+        CWD.push_str(name);
+    }
+    relist();
+}
+
+/// Chemin complet (relatif au partage) d'une entrée de la liste courante.
+fn full_path(name: &str) -> String {
+    let cwd = unsafe { CWD.clone() };
+    if cwd.is_empty() {
+        String::from(name)
+    } else {
+        let mut s = cwd;
+        s.push('/');
+        s.push_str(name);
+        s
+    }
+}
+
+/// Segments du fil d'Ariane : "racine" puis chaque dossier de `CWD`.
+fn crumbs() -> Vec<String> {
+    let mut c = alloc::vec![String::from("racine")];
+    let cwd = unsafe { CWD.clone() };
+    for seg in cwd.split('/').filter(|s| !s.is_empty()) {
+        c.push(String::from(seg));
+    }
+    c
+}
+
+/// Remonte au niveau `depth` du fil d'Ariane (0 = racine).
+fn go_crumb(depth: usize) {
+    let cwd = unsafe { CWD.clone() };
+    let segs: Vec<&str> = cwd.split('/').filter(|s| !s.is_empty()).collect();
+    let mut s = String::new();
+    for seg in segs.iter().take(depth) {
+        if !s.is_empty() {
+            s.push('/');
+        }
+        s.push_str(seg);
+    }
+    unsafe {
+        CWD = s;
+    }
+    relist();
 }
 
 pub fn close_all() {
@@ -166,13 +242,27 @@ pub fn on_click(mx: i32, my: i32) -> bool {
         if R_OUT > 0.5 && mx >= RIGHT_X0 {
             return true;
         }
-        // panneau gauche visible et clic dedans → sélection d'un fichier
+        // panneau gauche visible et clic dedans
         if L_OUT > 0.5 && mx < PW {
-            if my >= HEADER_H {
+            if my < HEADER_H {
+                // fil d'Ariane : remonter à un niveau
+                let lx = ((-(PW as f32)) * (1.0 - L_OUT)) as i32;
+                for (x0, x1, depth) in crumb_ranges(lx) {
+                    if mx >= x0 && mx < x1 {
+                        go_crumb(depth);
+                        break;
+                    }
+                }
+            } else {
                 let idx = (my - HEADER_H + L_SCROLL) / ROW_H;
                 if idx >= 0 && (idx as usize) < ENTRIES.len() {
                     let e = &ENTRIES[idx as usize];
-                    if !e.dir {
+                    if e.dir {
+                        if e.host {
+                            let name = e.name.clone();
+                            enter_dir(&name);
+                        }
+                    } else {
                         SEL = idx;
                         load_content();
                         R_ON = true;
@@ -197,7 +287,7 @@ fn load_content() {
         let e = &ENTRIES[SEL as usize];
         let name = e.name.clone();
         let mut data = if e.host {
-            p9::read_file(&name).unwrap_or_default()
+            p9::read_file(&full_path(&name)).unwrap_or_default()
         } else {
             match fs::find(name.as_bytes()) {
                 Some(i) => fs::get(i).map(|f| f.data[..f.len].to_vec()).unwrap_or_default(),
@@ -285,15 +375,74 @@ fn draw_left(lx: i32) {
         y += ROW_H;
     }
 
-    // en-tête
+    // en-tête : fil d'Ariane cliquable
     fb::fill_rect(lx, 0, PW, HEADER_H, P_TITLE_HI);
     fb::fill_rect(lx, HEADER_H - 2, PW, 2, P_FRAME);
-    dots::draw(dots::FOLDER, lx + PADX, 26, 4, P_TEXT, P_DIM);
-    font::draw_str_scaled(lx + PADX + 74, 20, "DOCUMENTS", P_TEXT, 3);
-    font::draw_str_scaled(lx + PADX + 74, 60, "molette : defiler   clic : ouvrir", P_DIM, 2);
+    dots::draw(dots::FOLDER, lx + PADX, 14, 4, P_TEXT, P_DIM);
+
+    let segs = crumbs();
+    let ranges = crumb_ranges(lx);
+    let sep_w = font::width_scaled(" / ", 2);
+    for (i, (x0, _x1, _d)) in ranges.iter().enumerate() {
+        let cur = i + 1 == segs.len();
+        let col = if cur { P_ACCENT } else { P_TEXT };
+        font::draw_str_scaled(*x0, 16, &segs[i], col, 2);
+        if !cur {
+            font::draw_str_scaled(*x0 + font::width_scaled(&segs[i], 2), 16, " / ", P_DIM, 2);
+        }
+    }
+    let _ = sep_w;
+
+    let n = unsafe { ENTRIES.len() };
+    let mut line = [0u8; 40];
+    let mut k = itoa(n as u32, &mut line);
+    for &c in b" elements  -  molette pour defiler" {
+        if k < line.len() {
+            line[k] = c;
+            k += 1;
+        }
+    }
+    font::draw_str_scaled(
+        lx + PADX + 70,
+        60,
+        core::str::from_utf8(&line[..k]).unwrap_or(""),
+        P_DIM,
+        1,
+    );
 
     // ascenseur
     scrollbar(lx + PW - 8, list_content_h(), unsafe { L_SCROLL });
+}
+
+/// Position x de chaque segment du fil d'Ariane (x0, x1, profondeur).
+fn crumb_ranges(lx: i32) -> Vec<(i32, i32, usize)> {
+    let segs = crumbs();
+    let sep_w = font::width_scaled(" / ", 2);
+    let mut out = Vec::new();
+    let mut x = lx + PADX + 70;
+    for (i, s) in segs.iter().enumerate() {
+        let w = font::width_scaled(s, 2);
+        out.push((x, x + w, i));
+        x += w + sep_w;
+    }
+    out
+}
+
+fn itoa(mut v: u32, buf: &mut [u8]) -> usize {
+    let mut tmp = [0u8; 12];
+    let mut n = 0;
+    loop {
+        tmp[n] = b'0' + (v % 10) as u8;
+        v /= 10;
+        n += 1;
+        if v == 0 {
+            break;
+        }
+    }
+    for i in 0..n {
+        buf[i] = tmp[n - 1 - i];
+    }
+    n
 }
 
 fn draw_right(rx: i32) {

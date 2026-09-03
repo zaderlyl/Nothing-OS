@@ -225,7 +225,7 @@ fn run_command(cmd: &[u8], wm: &mut win::Manager) {
 fn app_mood(app: win::App) -> (Option<asti::Pose>, asti::Tint) {
     match app {
         win::App::Editor => (Some(asti::Pose::AppCode), asti::Tint::Code),
-        win::App::Terminal => (Some(asti::Pose::AppCode), asti::Tint::Code),
+        win::App::Terminal => (Some(asti::Pose::AppTerm), asti::Tint::Matrix),
         win::App::Calc => (Some(asti::Pose::AppGit), asti::Tint::Git),
         win::App::Files => (Some(asti::Pose::AppGit), asti::Tint::Git),
         win::App::Web => (Some(asti::Pose::AppWeb), asti::Tint::Web),
