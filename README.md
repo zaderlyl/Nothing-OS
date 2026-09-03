@@ -106,10 +106,13 @@ rustup default stable                 # installe la toolchain Rust stable
 rustup target add x86_64-unknown-linux-gnu   # core/std x86_64 précompilés
 
 # 2. Construire + lancer
-make run            # QEMU plein écran (⌃⌘F pour sortir, ⌃⌥G libère la souris)
-make run-window     # idem, mais fenêtré (pratique pour déboguer)
+make run            # QEMU fenêtré — CLIQUE dans la fenêtre pour que la
+                    #   souris marche (PS/2 relative) ; ⌃⌥G la relâche
+make run-fs         # idem, plein écran (⌃⌘F pour sortir)
 make run-headless   # sans affichage, traces de boot sur le port série
 ```
+
+Raccourci dans l'OS : **Maj + Tab + Cmd** pour l'éteindre.
 
 > Le `Makefile` retrouve `cargo`/`rustc` via `rustup` même si le paquet
 > Homebrew `rustup` ne les met pas dans le `PATH`.
@@ -182,38 +185,39 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
 - ✅ Base de temps (`src/time.rs`) : calibration du TSC contre le canal 2
   du PIT (sans interruptions), avec garde-fous (repli 1 GHz) pour ne
   jamais renvoyer 0 et figer la boucle de rendu.
-- ✅ **Asti** (`src/asti.rs`) : portage direct du moteur de PC Pet
+- ✅ **Asti** (`src/asti.rs`) : portage du moteur de PC Pet
   (`renderer/engine.js` + `pet.js`). Buffer de luminance `f32` 25×25,
-  primitives `disc` / `hole` / `stroke` identiques, `drawCreature` (mode
-  visage : yeux + sourire + pose « il mange »), `renderToScreen` (boîtier,
-  points éteints, 9 niveaux + halo), table `TINTS`. `Brain` planifie les
-  micro-animations au repos (`blink`, regards) comme dans `pet.js`.
-- ✅ Souris PS/2 (`src/mouse.rs`) : en polling, curseur flèche. Vide
-  aussi les octets clavier (sinon un octet coincé fige la souris).
+  primitives identiques, `render(cv, ox)` (boîtier + relief, points
+  éteints, 9 niveaux + halo). Jeu d'animations large : ~11 styles d'yeux,
+  8 bouches, extras (cœurs, étoiles, notes, Z, miettes...), rotation,
+  blush. `Brain` : repos (blink, regards, twitch, bâillement), **mode
+  selon l'heure** (jour / soir / nuit, via CMOS), une **pose de
+  dégustation par friandise** (nom, nibble, gnaw, gulp, crunch, spicy,
+  sugarrush, recharge), et des **humeurs spontanées** toutes les ~30 s
+  (content, amour, danse, tête qui tourne...). Poses spécifiques aux
+  applis non portées (pas de détection d'app dans l'OS).
+- ✅ Souris PS/2 (`src/mouse.rs`) : polling. Curseur agrandi + anneau au
+  clic. Vide aussi les octets clavier vers `src/kbd.rs`.
+- ✅ Clavier PS/2 (`src/kbd.rs`) : suit les touches enfoncées.
+  **Maj + Tab + Cmd → extinction** (`power_off()`, ACPI QEMU).
+- ✅ Horloge CMOS (`src/rtc.rs`) : heure réelle (BCD, 12/24 h).
 - ✅ Police (`src/font.rs`) : récupérée du plan 2 de la VRAM (celle du
   BIOS) ; rendu normal, mis à l'échelle, ou en points (`draw_str_dots`).
 - ✅ Bureau (`src/home.rs`) : fond noir. Au centre « NOTHING OS » en
-  points + une barre de recherche (visuelle). La **barre latérale**
-  (tâches à faire, séparateur centré discret, résumé mail/agenda/système,
-  horloge CMOS `src/rtc.rs`) est **cachée** : elle glisse depuis la
-  gauche au frôlement du bord. Asti reste en haut à droite.
-  `make run` lance QEMU en plein écran (`-full-screen`).
-- ✅ Étagère de friandises (`src/shelf.rs`) : 9 friandises dessinées en
-  points (motifs de `treats.html`). **Cachée** par défaut ; se déplie
-  quand la souris passe sur Asti (ou sur l'étagère), se replie sinon
-  (sursis 0,5 s). Clic sur une friandise → `feed()` + pose « nom » ;
-  la friandise revient ~2,6 s plus tard.
+  points + barre de recherche (visuelle). **Barre latérale cachée**
+  (tâches, séparateur centré discret, résumé, horloge) qui glisse depuis
+  la gauche au frôlement du bord. Asti en haut à droite, toujours visible.
+- ✅ Friandises (`src/shelf.rs`) : 9 motifs LED de `treats.html`. Étagère
+  cachée, se déplie au survol d'Asti. **Glisser-déposer** une friandise
+  sur Asti → dégustation ; sinon elle revient. Cooldown ~2,6 s.
 
 ## Prochaines étapes possibles
 
-- **Timer (PIT, IRQ0)** : faire baisser la nourriture d'Asti avec le
-  temps — c'est ce qui le rendra vraiment "vivant". (Il manque aussi une
-  jauge visible du niveau de faim.)
-- Passer la souris (et le timer) en **interruptions** au lieu du polling.
-- **Pilote clavier PS/2 (IRQ1)** : rendre la barre de recherche
-  fonctionnelle, et une touche pour nourrir Asti.
-- Rendre réels les contenus de la barre latérale (tâches, mail, agenda) —
-  actuellement des placeholders codés en dur.
+- **Timer (PIT, IRQ0)** : la faim d'Asti qui descend toute seule + une
+  jauge visible.
+- Souris / clavier / timer en **interruptions** au lieu du polling.
+- Rendre la **barre de recherche** fonctionnelle (décodage clavier → texte).
+- Rendre réels les contenus de la barre latérale (placeholders codés en dur).
 - Porter plus de poses/teintes de PC Pet (bâillement, sommeil la "nuit",
   réactions).
 - Un allocateur mémoire (`#[global_allocator]`) pour débloquer `alloc`
