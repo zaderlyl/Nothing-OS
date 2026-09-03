@@ -21,6 +21,7 @@ mod font;
 mod gdt;
 mod home;
 mod interrupts;
+mod kbd;
 mod mouse;
 mod port;
 mod rtc;

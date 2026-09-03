@@ -155,7 +155,8 @@ pub fn poll() {
             }
             let b = inb(DATA);
             if st & 0x20 == 0 {
-                continue; // octet clavier → jeté, on continue de vider
+                crate::kbd::feed(b); // octet clavier → au pilote clavier
+                continue;
             }
 
             if PHASE == 0 && b & 0x08 == 0 {
@@ -204,32 +205,36 @@ pub fn state() -> State {
     }
 }
 
-// Curseur flèche 12×19, 1 bit par pixel (0 = transparent, 1 = tracé).
-// 'X' = blanc, '.' = transparent, 'o' = contour sombre.
-const CURSOR: [&str; 19] = [
-    "X.........",
-    "Xo........",
-    "Xoo.......",
-    "Xooo......",
-    "Xoooo.....",
-    "Xooooo....",
-    "Xoooooo...",
-    "Xooooooo..",
-    "Xoooooooo.",
-    "Xooooooooo",
-    "Xoooooo...",
-    "Xoo.Xoo...",
-    "Xo..Xoo...",
-    "X....Xoo..",
-    ".....Xoo..",
-    "......Xoo.",
-    "......Xoo.",
-    ".......X..",
-    "..........",
+// Curseur flèche 11×18. 'X' = intérieur clair, 'o' = contour sombre.
+const CURSOR: [&str; 18] = [
+    "Xo.........",
+    "XXo........",
+    "XXXo.......",
+    "XXXXo......",
+    "XXXXXo.....",
+    "XXXXXXo....",
+    "XXXXXXXo...",
+    "XXXXXXXXo..",
+    "XXXXXXXXXo.",
+    "XXXXXXXXXXo",
+    "XXXXXXo....",
+    "XXXoXXo....",
+    "XXo.XXXo...",
+    "Xo..oXXo...",
+    "o....XXXo..",
+    ".....oXXo..",
+    "......oXo..",
+    ".......o...",
 ];
 
-/// Dessine le curseur (pointe en haut-gauche à (x, y)).
-pub fn draw_cursor(x: i32, y: i32, white: u8, dark: u8) {
+/// Dessine le curseur, agrandi ×`scale`. Quand on clique, un petit
+/// anneau clignote autour de la pointe pour le rendre bien visible.
+pub fn draw_cursor(x: i32, y: i32, white: u8, dark: u8, scale: i32, clicking: bool) {
+    if clicking {
+        // anneau : disque clair puis évidé
+        fb::fill_circle(x as f32, y as f32, 10.0 * scale as f32, white);
+        fb::fill_circle(x as f32, y as f32, 8.0 * scale as f32, 0);
+    }
     for (row, line) in CURSOR.iter().enumerate() {
         for (col, ch) in line.bytes().enumerate() {
             let c = match ch {
@@ -237,7 +242,13 @@ pub fn draw_cursor(x: i32, y: i32, white: u8, dark: u8) {
                 b'o' => dark,
                 _ => continue,
             };
-            fb::put(x + col as i32, y + row as i32, c);
+            fb::fill_rect(
+                x + col as i32 * scale,
+                y + row as i32 * scale,
+                scale,
+                scale,
+                c,
+            );
         }
     }
 }

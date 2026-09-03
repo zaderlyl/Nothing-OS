@@ -83,12 +83,16 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 
 fn draw_hero(now: f32) {
     // --- NOTHING OS, en points, centré ---
-    const TITLE: &str = "NOTHING OS";
+    // Petit espace en plus entre le "T" et le "H".
     const DOT_CELL: i32 = 10;
-    let tw = TITLE.len() as i32 * 8 * DOT_CELL;
+    const GAP: i32 = 2 * DOT_CELL; // ~quart de caractère
+    let w_not = 3 * 8 * DOT_CELL;
+    let w_rest = 7 * 8 * DOT_CELL; // "HING OS"
+    let tw = w_not + GAP + w_rest;
     let tx = (W - tw) / 2;
     let ty = H * 30 / 100;
-    font::draw_str_dots(tx, ty, TITLE, PAL_TITLE, DOT_CELL);
+    font::draw_str_dots(tx, ty, "NOT", PAL_TITLE, DOT_CELL);
+    font::draw_str_dots(tx + w_not + GAP, ty, "HING OS", PAL_TITLE, DOT_CELL);
 
     // --- barre de recherche, un peu plus bas ---
     let bw = 760;
@@ -176,8 +180,15 @@ pub fn run(mut brain: asti::Brain) -> ! {
     let mut last = time::now_secs();
     let mut click_latch = false;
     let mut diag_t = last;
+    let mut drag: Option<shelf::Kind> = None; // friandise en cours de glissement
 
     loop {
+        // --- raccourci de fermeture : Maj + Tab + Cmd ---
+        if crate::kbd::close_combo() {
+            crate::serial_println!("[nothing-os] fermeture (Maj+Tab+Cmd)");
+            crate::kbd::power_off();
+        }
+
         let now = time::now_secs();
         let dt = (now - last).clamp(0.0, 0.1);
         last = now;
@@ -205,8 +216,8 @@ pub fn run(mut brain: asti::Brain) -> ! {
             let (dx, dy) = (m.x as f32 - dcx, m.y as f32 - dcy);
             dx * dx + dy * dy < (rad + 8.0) * (rad + 8.0)
         };
-        let over_shelf = shelf_out > 0.3 && shelf::hit(m.x, m.y).is_some();
-        if over_asti || over_shelf {
+        let over_shelf = shelf_out > 0.3 && shelf::hit(m.x, m.y, now).is_some();
+        if over_asti || over_shelf || drag.is_some() {
             shelf_leave = now;
         }
         let want = if now - shelf_leave < 0.5 { 1.0 } else { 0.0 };
@@ -223,12 +234,25 @@ pub fn run(mut brain: asti::Brain) -> ! {
         side_out += (side_want - side_out) * (1.0 - libm::powf(0.5, dt * 9.0));
         side_out = side_out.clamp(0.0, 1.0);
 
-        // --- clic sur une friandise ---
-        if m.left && !click_latch && shelf_out > 0.6 {
-            if let Some(kind) = shelf::hit(m.x, m.y) {
-                if shelf::take(kind, now) {
+        // --- glisser-déposer d'une friandise sur Asti ---
+        if m.left && !click_latch {
+            // début de glissement : appui sur une friandise
+            if drag.is_none() && shelf_out > 0.5 {
+                if let Some(kind) = shelf::hit(m.x, m.y, now) {
+                    shelf::pick(kind);
+                    drag = Some(kind);
+                }
+            }
+        }
+        if !m.left && click_latch {
+            // relâché : sur Asti → on nourrit, sinon la friandise revient
+            if let Some(kind) = drag.take() {
+                if over_asti {
+                    shelf::consume(kind, now);
                     feed(kind.boost());
                     brain.react_feed(now);
+                } else {
+                    shelf::restore(kind);
                 }
             }
         }
@@ -248,7 +272,12 @@ pub fn run(mut brain: asti::Brain) -> ! {
         if side_out > 0.01 {
             draw_sidebar(lerp(-(SIDE_W as f32) - 4.0, 0.0, side_out) as i32);
         }
-        mouse::draw_cursor(m.x, m.y, PAL_CURSOR, PAL_CURSOR_EDGE);
+        // friandise "en vol" sous le curseur pendant le glissement
+        if let Some(kind) = drag {
+            let (tw, th) = shelf::treat_size(kind, 5);
+            shelf::draw_treat_at(kind, m.x - tw / 2, m.y - th / 2, 5);
+        }
+        mouse::draw_cursor(m.x, m.y, PAL_CURSOR, PAL_CURSOR_EDGE, 3, m.left && drag.is_none());
         fb::present();
 
         let mut guard = 0u32;
