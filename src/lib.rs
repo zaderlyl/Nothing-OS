@@ -27,6 +27,7 @@ mod fs;
 mod gdt;
 mod heap;
 mod home;
+mod hostfs;
 mod interrupts;
 mod kbd;
 mod mouse;
@@ -157,6 +158,7 @@ pub extern "C" fn rust_main() -> ! {
     if virtio::init_9p() {
         p9::init();
         p9::selftest();
+        hostfs::refresh_dir();
     }
 
     font::capture(); // encore en mode texte : on récupère la police du BIOS

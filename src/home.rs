@@ -193,8 +193,22 @@ fn run_command(cmd: &[u8], wm: &mut win::Manager) {
             let title: &[u8] = if t.is_empty() { rest } else { t };
             wm.spawn(k, title, if k == win::App::Editor { b"" } else { rest });
         }
-        b"/document" | b"/documents" => wm.spawn(win::App::Files, b"Fichiers", rest),
-        b"/fichier" if !rest.is_empty() => wm.spawn(win::App::Editor, rest, rest),
+        b"/document" | b"/documents" => {
+            crate::hostfs::refresh_dir();
+            wm.spawn(win::App::Files, b"Fichiers", rest);
+        }
+        b"/fichier" if !rest.is_empty() => {
+            // d'abord un vrai fichier du Mac (partage 9p) ; sinon local
+            let path = core::str::from_utf8(rest).unwrap_or("");
+            let short: &[u8] = match crate::hostfs::open(path) {
+                Some(_) => {
+                    crate::hostfs::refresh_dir();
+                    crate::hostfs::basename(path).as_bytes()
+                }
+                None => rest, // pas de partage 9p → fichier local RAM
+            };
+            wm.spawn(win::App::Editor, short, short);
+        }
         b"/web" if !rest.is_empty() => wm.spawn(win::App::Web, b"Recherche", rest),
         b"/terminal" | b"/term" => wm.spawn(win::App::Terminal, b"Terminal", b""),
         b"/aide" | b"/help" => wm.spawn(win::App::Unknown, b"Aide", b"/app /document /fichier /web /terminal"),
@@ -288,6 +302,7 @@ pub fn run(mut brain: asti::Brain) -> ! {
         // --- raccourci de fermeture : Maj + Tab + Cmd (enregistre avant) ---
         if crate::kbd::close_combo() {
             crate::serial_println!("[nothing-os] fermeture (Maj+Tab+Cmd)");
+            crate::hostfs::sync();
             crate::fs::flush();
             crate::kbd::power_off();
         }
@@ -297,6 +312,8 @@ pub fn run(mut brain: asti::Brain) -> ! {
         // enregistrement disque périodique (si des fichiers ont changé)
         if now - sync_t >= 2.0 {
             sync_t = now;
+            crate::hostfs::sync(); // fichiers du Mac modifiés -> réécriture 9p
+            crate::hostfs::refresh_dir();
             crate::fs::flush();
         }
         let dt = (now - last).clamp(0.0, 0.1);

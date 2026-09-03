@@ -296,17 +296,31 @@ fn draw_files(bx: i32, by: i32, bw: i32, _bh: i32) {
     font::draw_str_scaled(bx + 24, by + 16, "Fichiers  (/fichier <nom> pour ouvrir)", P_DIM, 2);
     let cols = ((bw - 40) / 190).max(1);
     let mut i = 0i32;
-    fs::each(|_, f| {
-        let cx = bx + 24 + (i % cols) * 190;
-        let cy = by + 60 + (i / cols) * 120;
-        let c = if f.is_dir() { P_ACCENT } else { P_TITLE_HI };
+
+    let mut tile = |name: &str, dir: bool, host: bool, i: &mut i32| {
+        let cx = bx + 24 + (*i % cols) * 190;
+        let cy = by + 64 + (*i / cols) * 120;
+        let c = if dir { P_ACCENT } else { P_TITLE_HI };
         fb::fill_rect(cx, cy, 60, 74, c);
-        if f.is_dir() {
+        if dir {
             fb::fill_rect(cx + 8, cy + 6, 24, 10, P_BODY);
         }
-        font::draw_str_scaled(cx, cy + 84, f.name(), P_TEXT, 2);
-        i += 1;
-    });
+        if host {
+            fb::fill_rect(cx + 44, cy + 58, 12, 12, P_STR); // pastille = Mac
+        }
+        font::draw_str_scaled(cx, cy + 84, name, P_TEXT, 2);
+        *i += 1;
+    };
+
+    if crate::hostfs::have_dir() {
+        font::draw_str_scaled(bx + 24, by + 40, "~/Documents (Mac)", P_STR, 2);
+        crate::hostfs::each_dir(|name, dir| tile(name, dir, true, &mut i));
+        // aligne la suite sur une nouvelle rangée
+        if i % cols != 0 {
+            i += cols - (i % cols);
+        }
+    }
+    fs::each(|_, f| tile(f.name(), f.is_dir(), false, &mut i));
 }
 
 fn draw_web(bx: i32, by: i32, bw: i32, _bh: i32, query: &str) {

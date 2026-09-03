@@ -117,11 +117,14 @@ impl Msg {
         }
         let rtype = r[4];
         if rtype != expect {
-            if rtype == R_LERROR && rsize >= 11 {
-                let ec = u32::from_le_bytes([r[7], r[8], r[9], r[10]]);
-                crate::serial_println!("[9p] Rlerror {} (attendait {})", ec, expect);
-            } else {
-                crate::serial_println!("[9p] type {} inattendu (attendait {})", rtype, expect);
+            // un Twalk qui échoue = simple test d'existence, inutile de crier
+            if expect != R_WALK {
+                if rtype == R_LERROR && rsize >= 11 {
+                    let ec = u32::from_le_bytes([r[7], r[8], r[9], r[10]]);
+                    crate::serial_println!("[9p] Rlerror {} (attendait {})", ec, expect);
+                } else {
+                    crate::serial_println!("[9p] type {} inattendu (attendait {})", rtype, expect);
+                }
             }
             return None;
         }
