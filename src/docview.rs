@@ -70,6 +70,9 @@ static mut VIEW_MSG: String = String::new();
 static mut IMG_W: i32 = 0;
 static mut IMG_H: i32 = 0;
 static mut IMG_PX: Vec<u8> = Vec::new();
+/// Fichier sélectionné mais pas encore chargé (le décodage bloque une
+/// image ou deux : on affiche « ... » d'abord).
+static mut PENDING: bool = false;
 
 pub fn active() -> bool {
     unsafe { L_ON || R_ON || L_OUT > 0.01 || R_OUT > 0.01 }
@@ -225,6 +228,14 @@ pub fn update(dt: f32) {
     if unsafe { !L_ON && R_ON } {
         close_right();
     }
+    // décodage différé d'une image / d'un fichier son (une frame après le
+    // clic, pour laisser s'afficher « ouverture... »)
+    if unsafe { PENDING } {
+        unsafe {
+            PENDING = false;
+        }
+        load_content();
+    }
     unsafe {
         L_OUT = approach(L_OUT, if L_ON { 1.0 } else { 0.0 }, dt, 11.0).clamp(0.0, 1.0);
         R_OUT = approach(R_OUT, if R_ON { 1.0 } else { 0.0 }, dt, 11.0).clamp(0.0, 1.0);
@@ -304,9 +315,14 @@ pub fn on_click(mx: i32, my: i32) -> bool {
                         }
                     } else {
                         SEL = idx;
-                        load_content();
                         R_ON = true;
                         R_SCROLL = 0;
+                        // affiche « ... » une frame, décode ensuite
+                        crate::ac97::stop();
+                        CONTENT_NAME = ENTRIES[idx as usize].name.clone();
+                        VIEW_MSG = String::from("ouverture...");
+                        VIEW = View::Message;
+                        PENDING = true;
                     }
                 }
             }
