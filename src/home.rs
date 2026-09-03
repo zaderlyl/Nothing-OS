@@ -321,6 +321,7 @@ pub fn run(mut brain: asti::Brain) -> ! {
         last = now;
 
         mouse::poll();
+        crate::ac97::poll(); // réalimente la carte son
         let m = mouse::state();
 
         let pressed = m.left && !click_latch;
@@ -472,6 +473,9 @@ pub fn run(mut brain: asti::Brain) -> ! {
         let mut guard = 0u32;
         while time::now_secs() - now < 1.0 / 30.0 && guard < 3_000_000 {
             mouse::poll();
+            if guard % 4096 == 0 {
+                crate::ac97::poll();
+            }
             core::hint::spin_loop();
             guard += 1;
         }

@@ -99,6 +99,7 @@ fn run(line: &[u8]) {
             out(b"feed         nourrit Asti (+10)");
             out(b"hunger       niveau de faim d'Asti");
             out(b"mem          memoire du tas");
+            out(b"snd          bip de test (carte son)");
             out(b"sync         enregistre sur le disque");
             out(b"clear        efface l'ecran");
         }
@@ -202,6 +203,14 @@ fn run(line: &[u8]) {
             FULL = false;
         },
         b"whoami" => out(b"utilisateur de Nothing OS"),
+        b"snd" => {
+            if crate::ac97::present() {
+                crate::ac97::test_tone(440.0, 1.0);
+                out(b"bip (440 Hz, 1 s)");
+            } else {
+                out(b"snd: pas de carte son");
+            }
+        }
         b"mem" => {
             let (used, free) = crate::heap::stats();
             let mut du = [0u8; 12];

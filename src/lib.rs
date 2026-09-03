@@ -18,6 +18,7 @@
 
 extern crate alloc;
 
+mod ac97;
 mod asti;
 mod ata;
 mod docview;
@@ -163,6 +164,8 @@ pub extern "C" fn rust_main() -> ! {
         p9::selftest();
         hostfs::refresh_dir();
     }
+
+    ac97::init(); // carte son (optionnelle)
 
     font::capture(); // encore en mode texte : on récupère la police du BIOS
     fs::init();

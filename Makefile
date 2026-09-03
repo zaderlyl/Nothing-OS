@@ -59,6 +59,11 @@ SHARE      ?= $(HOME)/Documents
 QEMU_9P    := -fsdev local,id=fsdev0,path=$(SHARE),security_model=none \
               -device virtio-9p-pci,fsdev=fsdev0,mount_tag=hostdocs,disable-modern=on
 
+# carte son AC'97 (pilote : src/ac97.rs). `coreaudio` sur macOS ;
+# surchargeable, ex. `make run AUDIODEV=wav,id=snd,path=/tmp/out.wav`.
+AUDIODEV   ?= coreaudio,id=snd
+QEMU_SND   := -audiodev $(AUDIODEV) -device AC97,audiodev=snd
+
 .PHONY: all kernel iso run run-fs run-headless run-iso clean
 
 all: $(KERNEL_BIN)
@@ -100,13 +105,13 @@ $(KERNEL_MB): kernel $(BUILD_DIR)/boot-mb.o $(BUILD_DIR)/long_mode.o $(LINKER)
 # relâche (macOS). En fenêtré c'est plus simple à gérer qu'en plein
 # écran, d'où le défaut ci-dessous ; `make run-fs` pour le plein écran.
 run: $(KERNEL_BIN) $(DISK)
-	$(QEMU) -kernel $(KERNEL_BIN) -vga std $(QEMU_DISK) $(QEMU_9P) -serial stdio $(QEMU_FLAGS)
+	$(QEMU) -kernel $(KERNEL_BIN) -vga std $(QEMU_DISK) $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS)
 
 run-fs: $(KERNEL_BIN) $(DISK)
-	$(QEMU) -kernel $(KERNEL_BIN) -vga std -full-screen $(QEMU_DISK) $(QEMU_9P) -serial stdio $(QEMU_FLAGS)
+	$(QEMU) -kernel $(KERNEL_BIN) -vga std -full-screen $(QEMU_DISK) $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS)
 
 run-headless: $(KERNEL_BIN)
-	$(QEMU) -kernel $(KERNEL_BIN) -display none $(QEMU_9P) -serial stdio $(QEMU_FLAGS)
+	$(QEMU) -kernel $(KERNEL_BIN) -display none $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS)
 
 # --- Voie GRUB / ISO (Linux) -----------------------------------------
 $(ISO): $(KERNEL_MB)
