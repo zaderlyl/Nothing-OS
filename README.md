@@ -2,23 +2,31 @@
 
 Un mini noyau "bare metal" x86_64, écrit en Rust, qui boot dans QEMU.
 
-L'idée : un "OS" minimaliste en 1920×1080, fond noir. Au centre,
-« NOTHING OS » en points et une **barre de commande** :
+L'idée : un "OS" minimaliste en 1920×1080, fond noir, **tout se fait au
+clavier**. Au centre, « NOTHING OS » en points et une **barre de
+commande** :
 
 | commande | effet |
 |---|---|
-| `/app <nom>` | ouvre une maquette de l'application |
-| `/document <nom>` | ouvre le gestionnaire de fichiers sur l'élément |
-| `/fichier <nom>` | ouvre le fichier |
-| `/web <mots>` | ouvre une « recherche Google » sur ces mots |
+| `/app terminal` | un vrai terminal (`ls`, `cat`, `echo`, `mkdir`, `write`, `rm`, `date`...) |
+| `/app editeur` | un vrai éditeur de texte |
+| `/app calc` | une calculatrice |
+| `/fichier <nom>` | ouvre (ou crée) le fichier dans l'éditeur |
+| `/document` | liste les fichiers |
+| `/web <mots>` | recherche **locale** dans les fichiers (pas de réseau) |
+
+Les fichiers vivent dans un **système de fichiers RAM** (`src/fs.rs`,
+perdu au redémarrage — pas de disque). Éditer un fichier dans l'éditeur
+puis faire `cat` dans le terminal : c'est le même fichier.
 
 À gauche, une barre latérale cachée (tâches, résumé, heure) qui glisse au
 frôlement du bord. En haut à droite, **Asti** — le compagnon, un portage
-du moteur de « PC Pet » (matrice de LED circulaire qui cligne des yeux,
-regarde, mange, danse...). Asti reste **au-dessus de toutes les
-fenêtres** et adopte l'humeur + la teinte de l'appli au premier plan.
-Son étagère de friandises se déplie au survol ; un bouton « i » y ouvre
-la fenêtre PC Pet Hub.
+du moteur de « PC Pet ». Asti reste **au-dessus de toutes les fenêtres**
+et adopte l'humeur + la teinte de l'appli au premier plan. Son étagère de
+friandises se déplie au survol ; un bouton « i » y ouvre PC Pet Hub.
+
+Navigation clavier : **Échap** revient à la barre de commande, un clic
+donne le focus à une fenêtre.
 
 ![Asti dans le bureau](docs/desktop.gif)
 
@@ -220,16 +228,20 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
 - ✅ Clavier PS/2 (`src/kbd.rs`) : scancodes → ASCII, la barre de commande
   est éditable, Entrée exécute. Maj+Tab+Cmd éteint la machine.
 - ✅ Fenêtres (`src/win.rs`) : mini gestionnaire (6 max, z-order, focus,
-  glisser par la barre de titre, bouton fermer). Maquettes par type
-  d'appli — éditeur, chat, graphe git, navigateur, fichiers, hub.
+  glisser par la barre de titre, bouton fermer). Le clavier va à la
+  fenêtre au premier plan (éditeur / terminal / calc) ou à la barre.
+- ✅ Système de fichiers RAM (`src/fs.rs`) : fichiers + dossiers,
+  emplacements fixes sans allocateur. Perdu au redémarrage.
+- ✅ Terminal (`src/term.rs`) : mini shell réel qui agit sur le fs.
+- ✅ Éditeur de texte (`src/editor.rs`) : édition réelle (curseur,
+  flèches, multi-lignes), écrit dans le fichier fs directement.
 
 ## Prochaines étapes possibles
 
-- **Timer (PIT, IRQ0)** : la faim d'Asti qui descend toute seule + une
-  jauge visible.
+- **Disque** (pilote ATA/AHCI) pour que les fichiers survivent au reboot.
+- **Timer (PIT, IRQ0)** : faim d'Asti qui descend + jauge visible.
 - Souris / clavier / timer en **interruptions** au lieu du polling.
-- Contenus réels : vrai système de fichiers, vraies tâches/mails
-  (aujourd'hui des maquettes / placeholders).
+- Sauvegarde explicite dans l'éditeur (Ctrl+S), copier/coller, molette.
 - Redimensionner les fenêtres, une vraie barre des tâches.
 - Porter plus de poses/teintes de PC Pet (bâillement, sommeil la "nuit",
   réactions).
