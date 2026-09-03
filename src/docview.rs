@@ -21,17 +21,7 @@ const W: i32 = fb::WIDTH as i32;
 const H: i32 = fb::HEIGHT as i32;
 
 const PW: i32 = 780; // largeur d'un panneau (~demi-écran)
-/// Largeur du panneau droit : compact pour l'audio, sinon demi-écran.
-fn rpw() -> i32 {
-    if unsafe { VIEW == View::Audio } {
-        520
-    } else {
-        PW
-    }
-}
-fn right_x0() -> i32 {
-    W - rpw()
-}
+const RIGHT_X0: i32 = W - PW;
 const PADX: i32 = 28;
 const HEADER_H: i32 = 100;
 const ROW_H: i32 = 46;
@@ -271,7 +261,9 @@ pub fn on_scroll(mx: i32, my: i32, delta: i32) {
     let _ = my;
     let step = delta * 40;
     unsafe {
-        if R_OUT > 0.5 && mx >= right_x0() {
+        if VIEW == View::Audio {
+            // rien à faire défiler
+        } else if R_OUT > 0.5 && mx >= RIGHT_X0 {
             R_SCROLL -= step;
         } else if L_OUT > 0.5 && mx < PW {
             L_SCROLL -= step;
@@ -286,11 +278,16 @@ pub fn on_click(mx: i32, my: i32) -> bool {
         return false;
     }
     unsafe {
-        // panneau droit visible et clic dedans
-        if R_OUT > 0.5 && mx >= right_x0() {
-            if VIEW == View::Audio {
+        // étiquette audio : petit rectangle en bas à droite (avant le
+        // « clic ailleurs » mais après la liste de gauche, plus bas)
+        if VIEW == View::Audio && R_OUT > 0.5 {
+            let (ax, ay, aw, ah) = audio_rect(1.0);
+            if mx >= ax && mx < ax + aw && my >= ay && my < ay + ah {
                 audio_click(mx, my);
+                return true;
             }
+        } else if R_OUT > 0.5 && mx >= RIGHT_X0 {
+            // autres vues : le panneau droit consomme le clic
             return true;
         }
         // panneau gauche visible et clic dedans
@@ -546,7 +543,11 @@ pub fn draw(_now: f32) {
             draw_left((-(PW as f32) * (1.0 - L_OUT)) as i32);
         }
         if R_OUT > 0.01 {
-            draw_right((W as f32 - PW as f32 * R_OUT) as i32);
+            if VIEW == View::Audio {
+                draw_audio_label(R_OUT);
+            } else {
+                draw_right((W as f32 - PW as f32 * R_OUT) as i32);
+            }
         }
     }
 }
@@ -650,13 +651,13 @@ fn itoa(mut v: u32, buf: &mut [u8]) -> usize {
 }
 
 fn draw_right(rx: i32) {
-    let w = rpw();
+    let w = PW;
     fb::fill_rect(rx, 0, w, H, P_CODE_BG);
     fb::fill_rect(rx, 0, 3, H, P_FRAME);
 
     match unsafe { &VIEW } {
         View::Image => draw_image(rx),
-        View::Audio => draw_audio(rx),
+        View::Audio => {} // dessiné par draw_audio_label (hors panneau)
         View::Message => {
             let msg = unsafe { &VIEW_MSG };
             let tw = font::width_scaled(msg, 2);
@@ -729,93 +730,111 @@ fn secs_str(s: f32, out: &mut [u8]) -> usize {
     n
 }
 
-/// Rectangle du lecteur audio à partir du bord gauche `x0` du panneau.
-fn audio_card(x0: i32) -> (i32, i32, i32, i32) {
-    let (cw, ch) = (440, 300);
-    // un peu sous le centre pour dégager Asti (coin haut-droite)
-    (x0 + (rpw() - cw) / 2, H / 2 - ch / 2 + 70, cw, ch)
-}
-
+// Petite étiquette de lecture, en bas à droite (glisse depuis le bord).
+const A_W: i32 = 540;
+const A_H: i32 = 90;
 const SPEEDS: [(f32, &str); 3] = [(1.0, "x1"), (1.5, "x1.5"), (2.0, "x2")];
 
-fn speed_pill(cx: i32, cy: i32, i: usize) -> (i32, i32, i32, i32) {
-    let w = 80;
-    (cx + 30 + i as i32 * (w + 14), cy + 244, w, 34)
+fn audio_rect(out: f32) -> (i32, i32, i32, i32) {
+    let shown = W - 28 - A_W;
+    let x = shown + ((1.0 - out) * (A_W as f32 + 56.0)) as i32;
+    (x, H - A_H - 52, A_W, A_H)
 }
 
-fn draw_audio(rx: i32) {
-    let (cx, cy, cw, _ch) = audio_card(rx);
+fn speed_chip(x: i32, y: i32, i: usize) -> (i32, i32, i32, i32) {
+    let (cw, gap) = (50, 8);
+    let x0 = x + A_W - 16 - (3 * cw + 2 * gap);
+    (x0 + i as i32 * (cw + gap), y + 12, cw, 26)
+}
 
-    // pochette
-    fb::fill_rect(cx - 2, cy - 2, cw + 4, 304, P_FRAME);
-    fb::fill_rect(cx, cy, cw, 300, P_TITLE_HI);
-    dots::draw_centered(dots::NOTE, cx, cy + 18, cw, 44, 4, P_ACCENT, P_TEXT);
+fn prog_bar(x: i32, y: i32) -> (i32, i32, i32) {
+    (x + 54, y + A_H - 24, A_W - 54 - 140)
+}
+
+fn draw_audio_label(out: f32) {
+    let (x, y, w, h) = audio_rect(out);
+    fb::fill_rect(x - 2, y - 2, w + 4, h + 4, P_FRAME);
+    fb::fill_rect(x, y, w, h, P_TITLE_HI);
 
     // bouton lecture / pause
-    let (bx, by) = (cx + cw / 2, cy + 118);
-    fb::fill_circle(bx as f32, by as f32, 36.0, P_ACCENT);
-    fb::fill_circle(bx as f32, by as f32, 32.0, P_TITLE_HI);
+    let (bx, by) = (x + 27, y + h / 2);
+    fb::fill_circle(bx as f32, by as f32, 18.0, P_ACCENT);
+    fb::fill_circle(bx as f32, by as f32, 15.0, P_TITLE_HI);
     let g = if crate::ac97::playing() {
         dots::PAUSE
     } else {
         dots::PLAY
     };
-    dots::draw_centered(g, bx - 22, by - 22, 44, 44, 4, P_ACCENT, P_ACCENT);
+    dots::draw_centered(g, bx - 12, by - 12, 24, 24, 2, P_ACCENT, P_ACCENT);
 
-    // barre de progression
-    let (px, py, pw) = (cx + 30, cy + 186, cw - 60);
-    let prog = crate::ac97::progress();
-    fb::fill_rect(px, py, pw, 8, P_FRAME);
-    fb::fill_rect(px, py, (pw as f32 * prog) as i32, 8, P_ACCENT);
-    let kx = px + (pw as f32 * prog) as i32;
-    fb::fill_rect(kx - 3, py - 5, 6, 18, P_TEXT);
+    // nom du morceau
+    let mut nb = [0u8; 40];
+    let name = trunc(unsafe { &CONTENT_NAME }, 24, &mut nb);
+    font::draw_str_scaled(x + 54, y + 13, name, P_TEXT, 2);
 
-    let dur = crate::ac97::duration();
-    let mut a = [0u8; 8];
-    let mut b = [0u8; 8];
-    let na = secs_str(dur * prog, &mut a);
-    let nb = secs_str(dur, &mut b);
-    font::draw_str_scaled(px, py + 18, core::str::from_utf8(&a[..na]).unwrap_or(""), P_DIM, 1);
-    let wr = font::width_scaled(core::str::from_utf8(&b[..nb]).unwrap_or(""), 1);
-    font::draw_str_scaled(px + pw - wr, py + 18, core::str::from_utf8(&b[..nb]).unwrap_or(""), P_DIM, 1);
-
-    // vitesses
+    // chips vitesse (en haut à droite)
     let cur = crate::ac97::speed();
     for (i, (v, lbl)) in SPEEDS.iter().enumerate() {
-        let (sx, sy, sw, sh) = speed_pill(cx, cy, i);
+        let (sx, sy, sw, sh) = speed_chip(x, y, i);
         let on = (cur - v).abs() < 0.05;
         fb::fill_rect(sx, sy, sw, sh, if on { P_ACCENT } else { P_FRAME });
-        let tw = font::width_scaled(lbl, 2);
+        let tw = font::width_scaled(lbl, 1);
         font::draw_str_scaled(
             sx + (sw - tw) / 2,
             sy + 9,
             lbl,
             if on { P_TITLE_HI } else { P_TEXT },
-            2,
+            1,
         );
     }
+
+    // barre de progression (en bas)
+    let prog = crate::ac97::progress();
+    let (px, py, pw) = prog_bar(x, y);
+    fb::fill_rect(px, py, pw, 6, P_FRAME);
+    fb::fill_rect(px, py, (pw as f32 * prog) as i32, 6, P_ACCENT);
+    let kx = px + (pw as f32 * prog) as i32;
+    fb::fill_rect(kx - 2, py - 4, 4, 14, P_TEXT);
+
+    // "1:04 / 3:12"
+    let dur = crate::ac97::duration();
+    let mut t = [0u8; 20];
+    let mut k = secs_str(dur * prog, &mut t);
+    for &c in b" / " {
+        if k < t.len() {
+            t[k] = c;
+            k += 1;
+        }
+    }
+    k += secs_str(dur, &mut t[k..]);
+    font::draw_str_scaled(
+        px + pw + 12,
+        py - 5,
+        core::str::from_utf8(&t[..k]).unwrap_or(""),
+        P_DIM,
+        1,
+    );
 }
 
 fn audio_click(mx: i32, my: i32) {
-    let x0 = right_x0();
-    let (cx, cy, cw, _ch) = audio_card(x0);
+    let (x, y, _w, h) = audio_rect(1.0);
 
-    let (bx, by) = (cx + cw / 2, cy + 118);
-    if (mx - bx).pow(2) + (my - by).pow(2) < 42 * 42 {
+    let (bx, by) = (x + 27, y + h / 2);
+    if (mx - bx).pow(2) + (my - by).pow(2) < 24 * 24 {
         crate::ac97::toggle();
         return;
     }
-    let (px, py, pw) = (cx + 30, cy + 186, cw - 60);
-    if mx >= px && mx <= px + pw && (my - (py + 4)).abs() < 16 {
-        crate::ac97::seek((mx - px) as f32 / pw as f32);
-        return;
-    }
     for (i, (v, _)) in SPEEDS.iter().enumerate() {
-        let (sx, sy, sw, sh) = speed_pill(cx, cy, i);
+        let (sx, sy, sw, sh) = speed_chip(x, y, i);
         if mx >= sx && mx <= sx + sw && my >= sy && my <= sy + sh {
             crate::ac97::set_speed(*v);
             return;
         }
+    }
+    let (px, py, pw) = prog_bar(x, y);
+    if mx >= px && mx <= px + pw && (my - (py + 3)).abs() < 14 {
+        crate::ac97::seek((mx - px) as f32 / pw as f32);
+        return;
     }
 }
 
