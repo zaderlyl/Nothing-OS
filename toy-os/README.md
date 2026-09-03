@@ -1,0 +1,113 @@
+# toy-os
+
+Un mini noyau "bare metal" x86_64, écrit en Rust, qui boot dans QEMU.
+C'est l'alternative "raisonnable" à un vrai OS complet : pas de pilotes
+matériels réels, pas de multi-tâche, juste assez de plomberie bas niveau
+(bootloader multiboot, passage en mode 64-bit, écran texte VGA) pour
+avoir un vrai noyau qui démarre et affiche quelque chose, avec une base
+saine pour ajouter des trucs petit à petit.
+
+![Capture d'écran du boot](docs/screenshot.png)
+
+## Comment ça boot
+
+1. **GRUB** (via une image ISO) charge `kernel.bin` en mémoire et démarre
+   le CPU en mode protégé 32-bit, comme le veut la norme *Multiboot 1*.
+2. `boot/boot.asm` (32-bit) vérifie qu'on a bien été chargé par un
+   bootloader multiboot, que le CPU supporte CPUID et le mode long
+   (64-bit), met en place des tables de pages pour identity-mapper le
+   premier Gio de RAM, puis active la pagination.
+3. `boot/long_mode.asm` (64-bit) reprend la main juste après le saut en
+   mode long : il active SSE (nécessaire pour le code Rust) puis appelle
+   `rust_main`.
+4. `src/lib.rs` (Rust, `#![no_std]`) prend le relais : il écrit dans le
+   buffer texte VGA (`0xb8000`) pour afficher le message de bienvenue,
+   et boucle en `hlt`.
+
+## Une bidouille assumée : pas de cible bare-metal "propre"
+
+La méthode standard pour faire un noyau Rust (le tuto *Writing an OS in
+Rust*, crate `bootloader`) demande une toolchain **nightly** + le
+composant **rust-src**, pour compiler `core`/`alloc` soi-même pour une
+cible bare-metal sur mesure (`-Z build-std`).
+
+Dans l'environnement cloud où ce projet a été construit, l'accès réseau
+vers `static.rust-lang.org` était bloqué : impossible d'installer
+nightly ou rust-src via `rustup`. Pour rester en Rust quand même, ce
+noyau est compilé pour la cible **hôte** `x86_64-unknown-linux-gnu`
+(celle qui est déjà installée par défaut, avec `core`/`alloc`
+précompilés), avec :
+
+- `crate-type = ["staticlib"]` : Rust produit juste un `.a`, pas un
+  exécutable Linux — c'est notre assembleur (`boot.asm` +
+  `long_mode.asm`) qui fournit le vrai point d'entrée et fait l'édition
+  de liens finale à la main avec `ld` et un linker script maison.
+- `relocation-model=static` (dans `.cargo/config.toml`) pour éviter le
+  code position-indépendant, inutile ici.
+- des implémentations maison de `memcpy`/`memset`/`memcmp`/`memmove`/
+  `bcmp` et un `rust_eh_personality` bidon, parce que sur la cible hôte
+  ces symboles sont normalement fournis par la libc, qu'on n'a pas ici.
+
+Ça marche très bien pour ce qu'on fait (pas d'exceptions C++, pas de
+vraie divergence d'ABI), mais ce n'est pas la voie "canonique". Si un
+jour l'accès à `static.rust-lang.org` est possible (par exemple en
+lançant ce projet sur ta machine plutôt qu'en environnement cloud
+restreint), la vraie suite logique est de repasser sur une cible
+bare-metal avec `rustup toolchain install nightly`, `rustup component
+add rust-src`, une target JSON custom (`x86_64-toy_os.json`) et
+`cargo build -Z build-std=core,alloc`. C'est plus propre et ça enlève
+tout le bricolage `memcpy`/`eh_personality`.
+
+## Construire et lancer
+
+Prérequis (Linux ; voir la note macOS plus bas) :
+
+```bash
+# Debian/Ubuntu
+sudo apt install nasm qemu-system-x86 grub-pc-bin grub-common xorriso mtools
+# + une toolchain Rust stable (rustup.rs, ou via ton gestionnaire de paquets)
+```
+
+```bash
+make            # build kernel.bin + toy-os.iso
+make run        # build puis lance dans QEMU avec un écran
+make run-headless   # pareil mais sans fenêtre, sortie sur le port série
+```
+
+### Note pour macOS
+
+`grub-mkrescue` est pénible à avoir sur macOS (il faut une version
+croisée de GRUB, ex. via un tap Homebrew type `x86_64-elf-grub`, pas
+toujours maintenu). Le plus simple pour itérer sur ce projet depuis ton
+Mac :
+
+- soit installer `nasm` et `qemu` via Homebrew et me redemander de
+  reconstruire/tester dans cet environnement cloud (qui a déjà tout
+  l'outillage GRUB) ;
+- soit lancer ce dépôt dans un conteneur Linux (Docker Desktop, ou une
+  image `ubuntu` avec les paquets ci-dessus) sur ta machine.
+
+## Débogage
+
+- `qemu.log` / l'option `-d int,guest_errors` de QEMU aide à repérer un
+  triple fault (le CPU redémarre en boucle silencieusement sinon).
+- Le port série (COM1, `0x3f8`) est utilisé pour des traces de debug
+  (voir `src/serial.rs`) : `make run-headless` les affiche directement
+  dans le terminal.
+- Le code assembleur pose des points de contrôle bien identifiables sur
+  le port série (des lettres `A`, `B`, `C`...) à chaque étape du boot :
+  très utile pour savoir où ça plante si jamais l'écran reste noir.
+
+## Prochaines étapes possibles
+
+- IDT + gestion des interruptions (indispensable avant de faire quoi que
+  ce soit de sérieux : sans ça, la moindre exception CPU = reboot
+  silencieux).
+- Pilote clavier PS/2 pour avoir une vraie boucle d'interaction.
+- Un allocateur mémoire (`#[global_allocator]`) pour débloquer `alloc`
+  (`Vec`, `String`, etc.).
+- Un ordonnanceur minimal (coopératif d'abord) pour faire tourner
+  plusieurs "tâches".
+- Basculer sur une vraie cible bare-metal + nightly (voir plus haut) une
+  fois qu'un accès réseau complet est possible, pour se débarrasser du
+  bricolage `memcpy`/`eh_personality`.
