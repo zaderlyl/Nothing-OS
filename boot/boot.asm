@@ -3,8 +3,15 @@
 ; long mode, puis saute en 64-bit vers long_mode_start (long_mode.asm).
 
 global start
+global pvh_start
 extern long_mode_start
 
+; --- En-tête Multiboot 1 (chargement par GRUB) ------------------------
+; Émis uniquement si on assemble avec `-d MULTIBOOT` (voir Makefile,
+; cible `iso`). `qemu -kernel` REFUSE un ELF64 qui contient un en-tête
+; multiboot ("Cannot load x86-64 image, give a 32bit one"), d'où le
+; conditionnel : le build par défaut passe par la note PVH ci-dessous.
+%ifdef MULTIBOOT
 MBALIGN  equ 1<<0
 MEMINFO  equ 1<<1
 FLAGS    equ MBALIGN | MEMINFO
@@ -16,6 +23,17 @@ align 4
     dd MAGIC
     dd FLAGS
     dd CHECKSUM
+%endif
+
+; --- Note PVH (Xen XEN_ELFNOTE_PHYS32_ENTRY) --------------------------
+; Permet à `qemu-system-x86_64 -kernel` de charger directement cet ELF64
+; et d'entrer en 32-bit à `pvh_start`, sans GRUB ni ISO.
+section .note.Xen note alloc noexec align=4
+    dd 4              ; namesz  = longueur de "Xen\0"
+    dd 4              ; descsz  = 4 (adresse d'entrée 32-bit)
+    dd 18             ; type    = XEN_ELFNOTE_PHYS32_ENTRY
+    db "Xen", 0       ; name
+    dd pvh_start      ; desc    = point d'entrée
 
 %macro SERIAL_CHAR 1
     push eax
@@ -29,12 +47,22 @@ align 4
 
 section .text
 bits 32
+
+; Entrée PVH (`qemu -kernel`) : ebx pointe sur hvm_start_info, aucun
+; "magic" à vérifier. On ne se sert pas des infos du chargeur ici.
+pvh_start:
+    mov esp, stack_top
+    jmp boot_common
+
+; Entrée Multiboot (GRUB) : eax = 0x2BADB002.
 start:
     mov esp, stack_top
-    SERIAL_CHAR 'A'
-
+%ifdef MULTIBOOT
     call check_multiboot
-    SERIAL_CHAR 'B'
+%endif
+
+boot_common:
+    SERIAL_CHAR 'A'
     call check_cpuid
     SERIAL_CHAR 'C'
     call check_long_mode

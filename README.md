@@ -12,20 +12,23 @@ plomberie bas niveau (bootloader multiboot, passage en mode 64-bit, GDT,
 IDT, écran texte VGA) pour avoir un vrai noyau qui démarre, avec une base
 saine pour ajouter des trucs petit à petit.
 
-![Capture d'écran du boot](docs/screenshot.png)
+![Capture d'écran de l'accueil](docs/screenshot.png)
 
-> ⚠️ La capture ci-dessus montre encore l'ancien écran de boot ; l'écran
-> d'accueil "Asti" n'a pas encore été re-photographié (pas de QEMU sur la
-> machine de dev actuelle).
+*(Capture réelle : `make run` sur un Mac Apple Silicon, QEMU via boot PVH.)*
 
 ## Comment ça boot
 
-1. **GRUB** (via une image ISO) charge `kernel.bin` en mémoire et démarre
-   le CPU en mode protégé 32-bit, comme le veut la norme *Multiboot 1*.
-2. `boot/boot.asm` (32-bit) vérifie qu'on a bien été chargé par un
-   bootloader multiboot, que le CPU supporte CPUID et le mode long
-   (64-bit), met en place des tables de pages pour identity-mapper le
-   premier Gio de RAM, puis active la pagination.
+1. Le chargeur amène le CPU jusqu'à `boot/boot.asm` en mode protégé
+   32-bit. Deux voies possibles :
+   - **`qemu -kernel`** (voie par défaut, macOS inclus) : QEMU lit une
+     *note PVH* (`XEN_ELFNOTE_PHYS32_ENTRY`) dans l'ELF et saute à
+     `pvh_start`. Pas de GRUB.
+   - **GRUB** (via une image ISO, `make iso`) : `boot.asm` est
+     ré-assemblé avec `-d MULTIBOOT` pour émettre l'en-tête *Multiboot 1*,
+     et l'entrée est `start` (qui vérifie le magic `0x2BADB002`).
+2. `boot/boot.asm` (32-bit) vérifie que le CPU supporte CPUID et le mode
+   long (64-bit), met en place des tables de pages pour identity-mapper
+   le premier Gio de RAM, puis active la pagination.
 3. `boot/long_mode.asm` (64-bit) reprend la main juste après le saut en
    mode long : il active SSE (nécessaire pour le code Rust) puis appelle
    `rust_main`.
@@ -80,22 +83,28 @@ tout le bricolage `memcpy`/`eh_personality`.
 
 ## Construire et lancer
 
-QEMU sait charger une image *Multiboot* directement (`qemu -kernel ...`),
-sans GRUB : pas besoin de `grub-mkrescue`. C'est la voie par défaut du
-`Makefile`, et elle marche pareil sur **macOS** et **Linux**.
+QEMU charge l'ELF64 directement via la *note PVH* (`qemu -kernel ...`),
+sans GRUB ni `grub-mkrescue`. C'est la voie par défaut du `Makefile`, et
+elle marche pareil sur **macOS** et **Linux**. Testé sur Mac Apple
+Silicon.
 
 ### macOS (Apple Silicon ou Intel)
 
 ```bash
 # 1. Outils (Homebrew)
-brew install rustup nasm qemu lld     # lld fournit `ld.lld`, l'éditeur de liens
-rustup-init -y && source "$HOME/.cargo/env"
+brew install rustup nasm qemu lld     # lld fournit ld.lld (éditeur de liens)
+rustup-init -y                        # installe la toolchain Rust stable
 rustup target add x86_64-unknown-linux-gnu   # core/std x86_64 précompilés
 
 # 2. Construire + lancer
-make run            # fenêtre QEMU (VGA) : tu dois voir l'accueil "Asti"
+make run            # fenêtre QEMU (VGA) : l'accueil "Asti"
 make run-headless   # sans fenêtre, traces de boot sur le port série
 ```
+
+> Si `cargo` n'est pas dans le `PATH` après `rustup-init` (paquet
+> Homebrew `rustup`), ajoute
+> `export PATH="$HOME/.cargo/bin:$PATH"` à ton shell — ou lance
+> `rustup default stable` une fois.
 
 Sur un Mac ARM, QEMU émule un x86_64 complet (plus lent qu'en natif, mais
 imperceptible pour un noyau aussi petit).
@@ -112,8 +121,8 @@ sudo apt install grub-pc-bin grub-common xorriso mtools
 ```
 
 ```bash
-make run        # QEMU direct (Multiboot, sans GRUB)
-make iso        # construit nothing-os.iso via GRUB
+make run        # QEMU direct (PVH, sans GRUB)
+make iso        # construit nothing-os.iso via GRUB (boot.asm -d MULTIBOOT)
 make run-iso    # lance l'ISO GRUB dans QEMU
 ```
 
@@ -136,12 +145,15 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
   (voir `src/serial.rs`) : `make run-headless` les affiche directement
   dans le terminal.
 - Le code assembleur pose des points de contrôle bien identifiables sur
-  le port série (des lettres `A`, `B`, `C`...) à chaque étape du boot :
-  très utile pour savoir où ça plante si jamais l'écran reste noir.
+  le port série (`A` `C` `D` `E` `F` `G` en 32-bit, `H` `I` en 64-bit) à
+  chaque étape du boot : très utile pour savoir où ça plante si l'écran
+  reste noir. Un boot sain affiche `ACDEFGHI` puis les lignes
+  `[nothing-os] ...`.
 
 ## État actuel
 
-- ✅ Boot multiboot -> long mode -> Rust, écran texte VGA (voir plus haut)
+- ✅ Boot (PVH `qemu -kernel` **ou** GRUB/Multiboot) -> long mode -> Rust,
+  écran texte VGA. Testé sur Mac Apple Silicon (`make run`).
 - ✅ GDT + TSS (`src/gdt.rs`) : GDT 64-bit minimale + TSS avec une entrée
   dans l'IST, pour donner au gestionnaire de double fault sa propre pile.
   Sans ça, un débordement de la pile noyau ne pourrait pas être servi et
