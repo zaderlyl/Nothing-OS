@@ -15,9 +15,12 @@ commande** :
 | `/document` | liste les fichiers |
 | `/web <mots>` | recherche **locale** dans les fichiers (pas de réseau) |
 
-Les fichiers vivent dans un **système de fichiers RAM** (`src/fs.rs`,
-perdu au redémarrage — pas de disque). Éditer un fichier dans l'éditeur
-puis faire `cat` dans le terminal : c'est le même fichier.
+Les fichiers vivent dans un **système de fichiers** (`src/fs.rs`) rendu
+**persistant** sur un disque : `make run` monte une image
+`nothingos.img` (16 Mio, sur le Mac) que le noyau voit comme un vrai
+disque dur (pilote ATA, `src/ata.rs`). Les fichiers survivent au
+redémarrage de Nothing OS. Éditer un fichier dans l'éditeur puis faire
+`cat` dans le terminal : c'est le même fichier.
 
 À gauche, une barre latérale cachée (tâches, résumé, heure) qui glisse au
 frôlement du bord. En haut à droite, **Asti** — le compagnon, un portage
@@ -230,15 +233,17 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
 - ✅ Fenêtres (`src/win.rs`) : mini gestionnaire (6 max, z-order, focus,
   glisser par la barre de titre, bouton fermer). Le clavier va à la
   fenêtre au premier plan (éditeur / terminal / calc) ou à la barre.
-- ✅ Système de fichiers RAM (`src/fs.rs`) : fichiers + dossiers,
-  emplacements fixes sans allocateur. Perdu au redémarrage.
+- ✅ Système de fichiers (`src/fs.rs`) : fichiers + dossiers, emplacements
+  fixes sans allocateur, **persistant sur disque**.
+- ✅ Pilote disque ATA/IDE PIO (`src/ata.rs`) : lecture/écriture de
+  secteurs. Le fs est écrit sur `nothingos.img` (`sync` ou toutes les 2 s).
 - ✅ Terminal (`src/term.rs`) : mini shell réel qui agit sur le fs.
 - ✅ Éditeur de texte (`src/editor.rs`) : édition réelle (curseur,
   flèches, multi-lignes), écrit dans le fichier fs directement.
 
 ## Prochaines étapes possibles
 
-- **Disque** (pilote ATA/AHCI) pour que les fichiers survivent au reboot.
+- **Partage 9p** : voir un vrai dossier du Mac depuis Nothing OS (virtio-9p).
 - **Timer (PIT, IRQ0)** : faim d'Asti qui descend + jauge visible.
 - Souris / clavier / timer en **interruptions** au lieu du polling.
 - Sauvegarde explicite dans l'éditeur (Ctrl+S), copier/coller, molette.
