@@ -2,16 +2,23 @@
 
 Un mini noyau "bare metal" x86_64, écrit en Rust, qui boot dans QEMU.
 
-L'idée : un "OS" minimaliste en 1920×1080, fond noir. À gauche une barre
-avec les **tâches à faire** en haut et un **résumé** (mail, agenda,
-système, heure) en bas. En haut à droite, **Asti** — le compagnon,
-toujours visible. Son **étagère de friandises** est cachée et se déplie
-quand la souris passe sur lui ; un clic sur une friandise le nourrit,
-puis l'étagère se replie quand la souris repart.
+L'idée : un "OS" minimaliste en 1920×1080, fond noir. Au centre,
+« NOTHING OS » en points et une **barre de commande** :
 
-Asti est un portage direct du moteur de rendu de l'appli « PC Pet » : une
-matrice de LED circulaire qui cligne des yeux, regarde autour d'elle, et
-mâche quand on la nourrit.
+| commande | effet |
+|---|---|
+| `/app <nom>` | ouvre une maquette de l'application |
+| `/document <nom>` | ouvre le gestionnaire de fichiers sur l'élément |
+| `/fichier <nom>` | ouvre le fichier |
+| `/web <mots>` | ouvre une « recherche Google » sur ces mots |
+
+À gauche, une barre latérale cachée (tâches, résumé, heure) qui glisse au
+frôlement du bord. En haut à droite, **Asti** — le compagnon, un portage
+du moteur de « PC Pet » (matrice de LED circulaire qui cligne des yeux,
+regarde, mange, danse...). Asti reste **au-dessus de toutes les
+fenêtres** et adopte l'humeur + la teinte de l'appli au premier plan.
+Son étagère de friandises se déplie au survol ; un bouton « i » y ouvre
+la fenêtre PC Pet Hub.
 
 ![Asti dans le bureau](docs/desktop.gif)
 
@@ -209,15 +216,21 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
   la gauche au frôlement du bord. Asti en haut à droite, toujours visible.
 - ✅ Friandises (`src/shelf.rs`) : 9 motifs LED de `treats.html`. Étagère
   cachée, se déplie au survol d'Asti. **Glisser-déposer** une friandise
-  sur Asti → dégustation ; sinon elle revient. Cooldown ~2,6 s.
+  sur Asti → dégustation ; sinon elle revient. Bouton « i » → PC Pet Hub.
+- ✅ Clavier PS/2 (`src/kbd.rs`) : scancodes → ASCII, la barre de commande
+  est éditable, Entrée exécute. Maj+Tab+Cmd éteint la machine.
+- ✅ Fenêtres (`src/win.rs`) : mini gestionnaire (6 max, z-order, focus,
+  glisser par la barre de titre, bouton fermer). Maquettes par type
+  d'appli — éditeur, chat, graphe git, navigateur, fichiers, hub.
 
 ## Prochaines étapes possibles
 
 - **Timer (PIT, IRQ0)** : la faim d'Asti qui descend toute seule + une
   jauge visible.
 - Souris / clavier / timer en **interruptions** au lieu du polling.
-- Rendre la **barre de recherche** fonctionnelle (décodage clavier → texte).
-- Rendre réels les contenus de la barre latérale (placeholders codés en dur).
+- Contenus réels : vrai système de fichiers, vraies tâches/mails
+  (aujourd'hui des maquettes / placeholders).
+- Redimensionner les fenêtres, une vraie barre des tâches.
 - Porter plus de poses/teintes de PC Pet (bâillement, sommeil la "nuit",
   réactions).
 - Un allocateur mémoire (`#[global_allocator]`) pour débloquer `alloc`

@@ -71,6 +71,7 @@ static mut RIGHT: bool = false;
 static mut PACKETS: u32 = 0;
 
 /// Nombre de paquets souris reçus depuis le boot (diagnostic).
+#[allow(dead_code)]
 pub fn packets() -> u32 {
     unsafe { PACKETS }
 }

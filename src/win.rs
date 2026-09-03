@@ -167,6 +167,7 @@ impl Manager {
         self.order[self.n - 1] = s;
     }
 
+    #[allow(dead_code)]
     pub fn any_open(&self) -> bool {
         self.n > 0
     }
