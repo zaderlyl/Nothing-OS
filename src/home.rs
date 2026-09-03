@@ -10,7 +10,7 @@
 
 use core::sync::atomic::{AtomicU8, Ordering};
 
-use crate::{asti, fb, font, mouse, rtc, shelf, time};
+use crate::{asti, fb, font, kbd, mouse, rtc, shelf, time, win};
 
 static FOOD: AtomicU8 = AtomicU8::new(100);
 
@@ -81,21 +81,20 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 // Centre de l'écran : titre en points + barre de recherche.
 // ---------------------------------------------------------------------
 
-fn draw_hero(now: f32) {
-    // --- NOTHING OS, en points, centré ---
-    // Petit espace en plus entre le "T" et le "H".
+fn draw_hero(now: f32, input: &str) {
+    // --- NOTHING OS, en points, centré (petit espace entre T et H) ---
     const DOT_CELL: i32 = 10;
-    const GAP: i32 = 2 * DOT_CELL; // ~quart de caractère
+    const GAP: i32 = 2 * DOT_CELL;
     let w_not = 3 * 8 * DOT_CELL;
-    let w_rest = 7 * 8 * DOT_CELL; // "HING OS"
+    let w_rest = 7 * 8 * DOT_CELL;
     let tw = w_not + GAP + w_rest;
     let tx = (W - tw) / 2;
     let ty = H * 30 / 100;
     font::draw_str_dots(tx, ty, "NOT", PAL_TITLE, DOT_CELL);
     font::draw_str_dots(tx + w_not + GAP, ty, "HING OS", PAL_TITLE, DOT_CELL);
 
-    // --- barre de recherche, un peu plus bas ---
-    let bw = 760;
+    // --- barre de commande ---
+    let bw = 900;
     let bh = 54;
     let bx = (W - bw) / 2;
     let by = ty + 16 * DOT_CELL + 60;
@@ -108,7 +107,6 @@ fn draw_hero(now: f32) {
     fb::fill_circle((bx + bw) as f32, (by + bh / 2) as f32, r - 2.0, PAL_SEARCH);
     fb::fill_rect(bx, by + 2, bw, bh - 4, PAL_SEARCH);
 
-    // loupe
     let (mx, my) = (bx + 26, by + bh / 2);
     fb::fill_circle(mx as f32, my as f32, 9.0, PAL_TEXT_DIM);
     fb::fill_circle(mx as f32, my as f32, 6.0, PAL_SEARCH);
@@ -116,10 +114,92 @@ fn draw_hero(now: f32) {
         fb::fill_rect(mx + 6 + i, my + 6 + i, 3, 3, PAL_TEXT_DIM);
     }
 
-    // texte indicatif + curseur clignotant
-    font::draw_str_scaled(bx + 52, by + bh / 2 - 8, "Rechercher", PAL_TEXT_DIM, 2);
+    let tx0 = bx + 52;
+    let ty0 = by + bh / 2 - 8;
+    if input.is_empty() {
+        font::draw_str_scaled(tx0, ty0, "Rechercher   /app  /document  /fichier  /web", PAL_TEXT_DIM, 2);
+    } else {
+        font::draw_str_scaled(tx0, ty0, input, PAL_TEXT, 2);
+    }
+    let caret_x = tx0 + font::width_scaled(input, 2) + 4;
     if (now * 2.0) as i32 % 2 == 0 {
-        fb::fill_rect(bx + 52 + font::width_scaled("Rechercher", 2) + 6, by + 12, 3, bh - 24, PAL_TEXT);
+        fb::fill_rect(caret_x, by + 12, 3, bh - 24, PAL_TEXT);
+    }
+}
+
+// --- analyse d'une commande "/verbe reste" ---
+
+fn trim(s: &[u8]) -> &[u8] {
+    let mut a = 0;
+    let mut b = s.len();
+    while a < b && s[a] == b' ' {
+        a += 1;
+    }
+    while b > a && s[b - 1] == b' ' {
+        b -= 1;
+    }
+    &s[a..b]
+}
+
+fn ci_contains(hay: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() || needle.len() > hay.len() {
+        return false;
+    }
+    let low = |c: u8| if c.is_ascii_uppercase() { c + 32 } else { c };
+    'outer: for i in 0..=hay.len() - needle.len() {
+        for j in 0..needle.len() {
+            if low(hay[i + j]) != low(needle[j]) {
+                continue 'outer;
+            }
+        }
+        return true;
+    }
+    false
+}
+
+fn app_kind(name: &[u8]) -> win::App {
+    if ci_contains(name, b"code") || ci_contains(name, b"vscode") {
+        win::App::Code
+    } else if ci_contains(name, b"discord") || ci_contains(name, b"chat") || ci_contains(name, b"slack") {
+        win::App::Chat
+    } else if ci_contains(name, b"git") {
+        win::App::Git
+    } else {
+        win::App::Generic
+    }
+}
+
+fn run_command(cmd: &[u8], wm: &mut win::Manager) {
+    let cmd = trim(cmd);
+    if cmd.is_empty() {
+        return;
+    }
+    let (verb, rest) = match cmd.iter().position(|&c| c == b' ') {
+        Some(i) => (&cmd[..i], trim(&cmd[i + 1..])),
+        None => (cmd, &b""[..]),
+    };
+    match verb {
+        b"/app" if !rest.is_empty() => wm.spawn(app_kind(rest), rest, rest),
+        b"/document" => wm.spawn(win::App::Files, b"Fichiers", rest),
+        b"/fichier" if !rest.is_empty() => wm.spawn(win::App::FileView, rest, rest),
+        b"/web" if !rest.is_empty() => wm.spawn(win::App::Web, b"Recherche Google", rest),
+        _ => {}
+    }
+    crate::serial_println!(
+        "[nothing-os] commande: {} [{}]",
+        core::str::from_utf8(verb).unwrap_or("?"),
+        core::str::from_utf8(rest).unwrap_or("?")
+    );
+}
+
+fn app_mood(app: win::App) -> (Option<asti::Pose>, asti::Tint) {
+    match app {
+        win::App::Code => (Some(asti::Pose::AppCode), asti::Tint::Code),
+        win::App::Chat => (Some(asti::Pose::AppChat), asti::Tint::Chat),
+        win::App::Git => (Some(asti::Pose::AppGit), asti::Tint::Git),
+        win::App::Web => (Some(asti::Pose::AppWeb), asti::Tint::Web),
+        win::App::Hub => (Some(asti::Pose::Hub), asti::Tint::Null),
+        _ => (None, asti::Tint::Null),
     }
 }
 
@@ -172,6 +252,12 @@ fn draw_sidebar(x0: i32) {
 pub fn run(mut brain: asti::Brain) -> ! {
     mouse::init();
     shelf::init();
+    win::install_palette();
+
+    let mut wm = win::Manager::new();
+    let mut input = [0u8; 96];
+    let mut ilen = 0usize;
+    let mut cur_tint = asti::Tint::Null;
 
     let mut shelf_out = 0.0_f32;
     let mut shelf_leave = -10.0_f32;
@@ -179,7 +265,6 @@ pub fn run(mut brain: asti::Brain) -> ! {
     let mut side_leave = -10.0_f32;
     let mut last = time::now_secs();
     let mut click_latch = false;
-    let mut diag_t = last;
     let mut drag: Option<shelf::Kind> = None; // friandise en cours de glissement
 
     loop {
@@ -196,17 +281,45 @@ pub fn run(mut brain: asti::Brain) -> ! {
         mouse::poll();
         let m = mouse::state();
 
-        // diagnostic souris : si x/y ne bougent jamais quand tu bouges la
-        // souris, c'est que QEMU ne "capture" pas le pointeur → clique
-        // dans la fenêtre (⌃⌥G pour relâcher).
-        if now - diag_t >= 3.0 {
-            diag_t = now;
-            crate::serial_println!(
-                "[nothing-os] souris x={} y={} paquets={}",
-                m.x,
-                m.y,
-                mouse::packets()
-            );
+        // --- saisie clavier dans la barre de commande ---
+        loop {
+            let c = kbd::pop_char();
+            if c == 0 {
+                break;
+            }
+            match c {
+                b'\n' => {
+                    run_command(&input[..ilen], &mut wm);
+                    ilen = 0;
+                }
+                0x08 => {
+                    if ilen > 0 {
+                        ilen -= 1;
+                    }
+                }
+                0x20..=0x7e => {
+                    if ilen < input.len() {
+                        input[ilen] = c;
+                        ilen += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let pressed = m.left && !click_latch;
+
+        // --- fenêtres : la souris d'abord (focus / glisser / fermer) ---
+        wm.on_mouse(m.x, m.y, m.left, pressed);
+
+        // humeur + teinte d'Asti selon la fenêtre au premier plan
+        let (mood, tint) = match wm.focused_app() {
+            Some(a) => app_mood(a),
+            None => (None, asti::Tint::Null),
+        };
+        brain.set_app(mood);
+        if tint != cur_tint {
+            cur_tint = tint;
+            asti::install_palette(tint);
         }
 
         // --- étagère : suit le survol d'Asti ---
@@ -216,7 +329,8 @@ pub fn run(mut brain: asti::Brain) -> ! {
             let (dx, dy) = (m.x as f32 - dcx, m.y as f32 - dcy);
             dx * dx + dy * dy < (rad + 8.0) * (rad + 8.0)
         };
-        let over_shelf = shelf_out > 0.3 && shelf::hit(m.x, m.y, now).is_some();
+        let over_shelf = shelf_out > 0.3
+            && (shelf::hit(m.x, m.y, now).is_some() || shelf::info_hit(m.x, m.y));
         if over_asti || over_shelf || drag.is_some() {
             shelf_leave = now;
         }
@@ -234,14 +348,13 @@ pub fn run(mut brain: asti::Brain) -> ! {
         side_out += (side_want - side_out) * (1.0 - libm::powf(0.5, dt * 9.0));
         side_out = side_out.clamp(0.0, 1.0);
 
-        // --- glisser-déposer d'une friandise sur Asti ---
-        if m.left && !click_latch {
-            // début de glissement : appui sur une friandise
-            if drag.is_none() && shelf_out > 0.5 {
-                if let Some(kind) = shelf::hit(m.x, m.y, now) {
-                    shelf::pick(kind);
-                    drag = Some(kind);
-                }
+        // --- glisser-déposer d'une friandise / bouton info ---
+        if pressed && shelf_out > 0.5 && drag.is_none() {
+            if shelf::info_hit(m.x, m.y) {
+                wm.spawn(win::App::Hub, b"PC Pet Hub", b"");
+            } else if let Some(kind) = shelf::hit(m.x, m.y, now) {
+                shelf::pick(kind);
+                drag = Some(kind);
             }
         }
         if !m.left && click_latch {
@@ -263,16 +376,18 @@ pub fn run(mut brain: asti::Brain) -> ! {
         let mut cv = asti::Canvas::new();
         asti::draw_creature(&mut cv, &state, now);
 
+        let input_str = core::str::from_utf8(&input[..ilen]).unwrap_or("");
+
         fb::clear(0);
-        draw_hero(now);
-        if shelf_out > 0.03 {
-            shelf::draw(shelf_out, now);
-        }
-        asti::render(&cv, asti::HOME_OX);
+        draw_hero(now, input_str);
         if side_out > 0.01 {
             draw_sidebar(lerp(-(SIDE_W as f32) - 4.0, 0.0, side_out) as i32);
         }
-        // friandise "en vol" sous le curseur pendant le glissement
+        wm.draw(now); // fenêtres
+        if shelf_out > 0.03 {
+            shelf::draw(shelf_out, now);
+        }
+        asti::render(&cv, asti::HOME_OX); // Asti par-dessus TOUT
         if let Some(kind) = drag {
             let (tw, th) = shelf::treat_size(kind, 5);
             shelf::draw_treat_at(kind, m.x - tw / 2, m.y - th / 2, 5);

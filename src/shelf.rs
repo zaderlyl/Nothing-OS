@@ -234,13 +234,34 @@ pub fn restore(kind: Kind) {
     unsafe { TAKEN_UNTIL[kind.idx()] = 0.0 }
 }
 
+/// Position du bouton « info » (PC Pet Hub), au-dessus des friandises.
+fn info_rect() -> (i32, i32, i32, i32) {
+    (X_SHOWN, TOP - SLOT, PANEL_W, CELL)
+}
+
+/// Le curseur est-il sur le bouton info ?
+pub fn info_hit(mx: i32, my: i32) -> bool {
+    let (x, y, w, h) = info_rect();
+    mx >= x - 20 && mx <= x + w + 30 && my >= y - 6 && my <= y + h + 6
+}
+
 pub fn draw(out: f32, now: f32) {
     let x = panel_x(out);
 
-    // panneau arrondi
-    let h = SLOT * ALL.len() as i32;
-    fb::fill_rect(x - 3, TOP - 5, PANEL_W + 6, h + 6, PAL_PANEL_EDGE);
-    fb::fill_rect(x - 2, TOP - 4, PANEL_W + 4, h + 4, PAL_PANEL);
+    // panneau arrondi (englobe aussi le bouton info, plus haut)
+    let h = SLOT * (ALL.len() as i32 + 1);
+    let top = TOP - SLOT;
+    fb::fill_rect(x - 3, top - 5, PANEL_W + 6, h + 6, PAL_PANEL_EDGE);
+    fb::fill_rect(x - 2, top - 4, PANEL_W + 4, h + 4, PAL_PANEL);
+
+    // bouton info : un "i" dans un cercle
+    let (ix, iy) = (x + PANEL_W / 2, TOP - SLOT + CELL / 2);
+    fb::fill_circle(ix as f32, iy as f32, (CELL / 2 - 6) as f32, PAL_DOT_DIM);
+    fb::fill_circle(ix as f32, iy as f32, (CELL / 2 - 9) as f32, PAL_PANEL);
+    fb::fill_rect(ix - 2, iy - 12, 5, 5, PAL_DOT);
+    fb::fill_rect(ix - 2, iy - 3, 5, 15, PAL_DOT);
+    // séparateur
+    fb::fill_rect(x + 6, TOP - 6, PANEL_W - 12, 1, PAL_PANEL_EDGE);
 
     for (i, &k) in ALL.iter().enumerate() {
         if is_taken(i, now) {

@@ -29,6 +29,7 @@ mod serial;
 mod shelf;
 mod time;
 mod vga;
+mod win;
 
 use core::panic::PanicInfo;
 

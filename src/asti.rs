@@ -419,6 +419,12 @@ pub enum Pose {
     Alert,
     Sad,
     Grumpy,
+    // humeurs "application" (tenues tant que la fenêtre est au 1er plan)
+    AppCode,
+    AppChat,
+    AppGit,
+    AppWeb,
+    Hub,
 }
 
 pub struct State {
@@ -687,6 +693,45 @@ pub fn draw_creature(cv: &mut Canvas, s: &State, t: f32) {
                 tilt = wave(t, 0.6) * 0.15;
                 bright = 0.8;
             }
+            // --- humeurs "application" (portées de engine.js) ---
+            Pose::AppCode => {
+                eye = if (t % 4.6) > 4.4 { EyeStyle::Calm } else { EyeStyle::Dot };
+                mouth = Mouth::Line;
+                look_v = 0.5;
+                look_h = sinf(t * 1.3) * 0.5;
+                cy += sinf(t * 4.2) * 0.14;
+                tilt = sinf(t * 0.4) * 0.02;
+            }
+            Pose::AppChat => {
+                eye = EyeStyle::Arc;
+                mouth = Mouth::Smile;
+                blush = true;
+                cx += sinf(t * 1.7) * 1.2;
+                tilt = sinf(t * 1.7) * 0.12;
+                if (t % 2.0) > 1.4 {
+                    ex.push(Extra::Note(cx + 6.0, cy - BODY_H - 1.0 - ((t * 1.3) % 3.5)));
+                }
+            }
+            Pose::AppGit => {
+                eye = if (t % 3.4) > 3.2 { EyeStyle::Calm } else { EyeStyle::Dot };
+                mouth = Mouth::Line;
+                look_v = 0.2 + sinf(t * 0.6) * 0.25;
+                tilt = sinf(t * 0.35) * 0.03;
+            }
+            Pose::AppWeb => {
+                eye = EyeStyle::Dot;
+                mouth = Mouth::Smile;
+                look_h = sinf(t * 0.9) * 2.2;
+                look_v = sinf(t * 0.5) * 0.4;
+                cy += sinf(t * 3.0) * 0.1;
+            }
+            Pose::Hub => {
+                let b = fabsf(wave(t, 2.5));
+                cy -= b * 1.2;
+                eye = EyeStyle::Heart;
+                mouth = Mouth::Grin;
+                blush = true;
+            }
             _ => {}
         }
     }
@@ -736,18 +781,56 @@ struct TintRgb {
     glow: [u8; 3],
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum Tint {
     Null,
+    Code,
+    Chat,
+    Git,
+    Web,
 }
 
-fn tint_rgb(_t: Tint) -> TintRgb {
-    TintRgb {
-        bg: [26, 28, 38],
-        off: [224, 231, 247],
-        off_a: 0.11,
-        lit: [233, 239, 253],
-        glow: [200, 220, 255],
+fn tint_rgb(t: Tint) -> TintRgb {
+    match t {
+        Tint::Null => TintRgb {
+            bg: [26, 28, 38],
+            off: [224, 231, 247],
+            off_a: 0.11,
+            lit: [233, 239, 253],
+            glow: [200, 220, 255],
+        },
+        // VS Code : bleu
+        Tint::Code => TintRgb {
+            bg: [10, 20, 32],
+            off: [0, 122, 204],
+            off_a: 0.16,
+            lit: [170, 210, 255],
+            glow: [0, 122, 204],
+        },
+        // Discord : bleu-violet
+        Tint::Chat => TintRgb {
+            bg: [18, 19, 34],
+            off: [112, 122, 238],
+            off_a: 0.14,
+            lit: [202, 208, 255],
+            glow: [88, 101, 242],
+        },
+        // Git : ardoise
+        Tint::Git => TintRgb {
+            bg: [16, 18, 24],
+            off: [139, 148, 158],
+            off_a: 0.16,
+            lit: [180, 195, 210],
+            glow: [88, 166, 255],
+        },
+        // Web : vert doux
+        Tint::Web => TintRgb {
+            bg: [10, 24, 12],
+            off: [120, 210, 130],
+            off_a: 0.13,
+            lit: [210, 255, 210],
+            glow: [120, 220, 130],
+        },
     }
 }
 
@@ -909,6 +992,7 @@ pub struct Brain {
     react_until: f32,
     scene_next: f32,
     mode: Mode,
+    app_pose: Option<Pose>,
 }
 
 impl Brain {
@@ -925,6 +1009,7 @@ impl Brain {
             react_until: 0.0,
             scene_next: 12.0,
             mode: Mode::Day,
+            app_pose: None,
         }
     }
 
@@ -932,6 +1017,11 @@ impl Brain {
     pub fn react(&mut self, pose: Pose, dur: f32, now: f32) {
         self.react = Some(pose);
         self.react_until = now + dur;
+    }
+
+    /// Humeur tenue tant qu'une appli est au premier plan (`None` = repos).
+    pub fn set_app(&mut self, pose: Option<Pose>) {
+        self.app_pose = pose;
     }
 
     pub fn react_feed(&mut self, kind: crate::shelf::Kind, now: f32) {
@@ -998,6 +1088,17 @@ impl Brain {
                 };
             }
             self.react = None;
+        }
+
+        // humeur "application" : tenue tant qu'une fenêtre est au 1er plan
+        if let Some(pose) = self.app_pose {
+            return State {
+                layer: 3,
+                pose,
+                phase: 0.0,
+                energy: self.energy,
+                mode: self.mode,
+            };
         }
 
         // petites humeurs spontanées au repos (jour uniquement)
