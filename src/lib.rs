@@ -1,0 +1,235 @@
+//! toy-os — un mini noyau "bare metal" x86_64 écrit en Rust.
+//!
+//! Ce crate est compilé en `staticlib` puis lié à la main avec un petit
+//! bootstrap assembleur (voir boot/) qui s'occupe du multiboot, du
+//! passage en long mode et de l'activation de SSE, avant d'appeler
+//! `rust_main`.
+//!
+//! Astuce d'environnement : ce noyau est compilé pour la cible "hôte"
+//! (x86_64-unknown-linux-gnu) plutôt que pour une vraie cible bare-metal,
+//! car l'installation d'une toolchain nightly + rust-src n'était pas
+//! possible ici. C'est un contournement qui fonctionne, mais la voie
+//! "propre" pour la suite serait de repasser sur une cible bare-metal
+//! (voir README).
+
+#![no_std]
+#![feature(abi_x86_interrupt)]
+
+mod gdt;
+mod interrupts;
+mod serial;
+mod vga;
+
+use core::panic::PanicInfo;
+
+// ---------------------------------------------------------------------
+// État global partagé : écran VGA et port série.
+//
+// Il n'existe qu'UNE seule instance de chacun (`WRITER`, `SERIAL1`),
+// protégée par un mutex "spinlock" (crate `spin` — pas besoin d'OS pour
+// ça, juste une boucle qui attend que le verrou se libère). C'est
+// important dès qu'on a des interruptions : un gestionnaire
+// d'interruption peut vouloir écrire à l'écran pendant qu'on est déjà en
+// train d'y écrire ailleurs, et il ne faut surtout pas que ça se fasse
+// via deux curseurs indépendants (sinon les écritures s'écrasent entre
+// elles, comme un vrai bug qu'on a eu ici en développant l'IDT).
+// ---------------------------------------------------------------------
+
+pub static WRITER: spin::Mutex<vga::Writer> = spin::Mutex::new(vga::Writer::new());
+pub static SERIAL1: spin::Mutex<serial::SerialPort> = spin::Mutex::new(serial::SerialPort::new());
+
+// On désactive les interruptions pendant qu'on tient un verrou : sans
+// ça, si une interruption arrive PENDANT qu'on écrit à l'écran (donc
+// avec WRITER déjà verrouillé) et que son gestionnaire essaie lui aussi
+// d'écrire à l'écran, il resterait bloqué à attendre un verrou qui ne se
+// libérera jamais (interruption arrivée au milieu du code qui devait
+// justement le libérer) → interblocage (deadlock) qui fige le noyau.
+
+#[doc(hidden)]
+pub fn _print(args: core::fmt::Arguments) {
+    use core::fmt::Write;
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        let _ = WRITER.lock().write_fmt(args);
+    });
+}
+
+#[doc(hidden)]
+pub fn _serial_print(args: core::fmt::Arguments) {
+    use core::fmt::Write;
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        let _ = SERIAL1.lock().write_fmt(args);
+    });
+}
+
+/// Change la couleur des prochains caractères écrits à l'écran.
+pub fn set_color(fg: vga::Color, bg: vga::Color) {
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        WRITER.lock().set_color(fg, bg);
+    });
+}
+
+/// Efface l'écran et remet le curseur en haut à gauche.
+pub fn clear_screen() {
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        WRITER.lock().clear_screen();
+    });
+}
+
+/// Écrit à l'écran (buffer texte VGA), comme `print!` en std.
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => ($crate::_print(core::format_args!($($arg)*)));
+}
+
+/// Comme `print!`, avec un retour à la ligne à la fin.
+#[macro_export]
+macro_rules! println {
+    () => ($crate::print!("\n"));
+    ($($arg:tt)*) => ($crate::print!("{}\n", core::format_args!($($arg)*)));
+}
+
+/// Écrit sur le port série COM1 (visible avec `make run-headless`),
+/// pour des traces de debug qui n'encombrent pas l'écran.
+#[macro_export]
+macro_rules! serial_print {
+    ($($arg:tt)*) => ($crate::_serial_print(core::format_args!($($arg)*)));
+}
+
+#[macro_export]
+macro_rules! serial_println {
+    () => ($crate::serial_print!("\n"));
+    ($($arg:tt)*) => ($crate::serial_print!("{}\n", core::format_args!($($arg)*)));
+}
+
+/// Point d'entrée appelé par long_mode.asm une fois le CPU en 64-bit,
+/// pagination et SSE activés.
+#[no_mangle]
+pub extern "C" fn rust_main() -> ! {
+    serial_println!("[toy-os] rust_main() a demarre");
+
+    gdt::init();
+    interrupts::init();
+
+    clear_screen();
+
+    set_color(vga::Color::Yellow, vga::Color::Black);
+    println!("==========================================");
+    println!("   toy-os -- mini noyau Rust bare metal");
+    println!("==========================================");
+
+    set_color(vga::Color::LightGreen, vga::Color::Black);
+    println!();
+    println!("Boot OK :");
+    println!("  - multiboot verifie");
+    println!("  - long mode (64-bit) actif");
+    println!("  - pagination (identity map 1 GiB) active");
+    println!("  - SSE active");
+    println!("  - GDT + TSS (pile dediee double fault)");
+    println!("  - IDT chargee (breakpoint, double fault)");
+
+    // Déclenche volontairement une interruption "breakpoint" (int3) pour
+    // prouver que l'IDT fonctionne : sans gestionnaire, ça plante tout ;
+    // avec, on voit le message ci-dessous et le noyau continue.
+    x86_64::instructions::interrupts::int3();
+
+    set_color(vga::Color::LightGreen, vga::Color::Black);
+    println!("On est revenus apres l'interruption : tout va bien !");
+
+    set_color(vga::Color::LightCyan, vga::Color::Black);
+    println!();
+    println!("Prochaines etapes possibles : clavier PS/2,");
+    println!("allocateur memoire, scheduler...");
+
+    serial_println!("[toy-os] affichage VGA termine, mise en boucle hlt");
+
+    halt_loop();
+}
+
+fn halt_loop() -> ! {
+    loop {
+        unsafe {
+            core::arch::asm!("hlt");
+        }
+    }
+}
+
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    serial_println!("[toy-os] PANIC: {}", info);
+
+    set_color(vga::Color::White, vga::Color::Red);
+    clear_screen();
+    println!("KERNEL PANIC");
+    println!("{}", info);
+
+    halt_loop();
+}
+
+// ---------------------------------------------------------------------
+// Implémentations minimales des intrinsèques mémoire (memcpy, memset,
+// memcmp, memmove). Sur une cible bare-metal "normale" ces symboles sont
+// fournis par compiler_builtins (feature "mem") ; comme on compile pour
+// la cible hôte (qui compte normalement sur la libc pour ça), on les
+// fournit nous-mêmes pour que l'édition de liens finale (faite à la main
+// avec `ld`, sans libc) trouve tout ce dont elle a besoin.
+// ---------------------------------------------------------------------
+
+#[no_mangle]
+pub unsafe extern "C" fn memcpy(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    let mut i = 0;
+    while i < n {
+        *dest.add(i) = *src.add(i);
+        i += 1;
+    }
+    dest
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn memset(dest: *mut u8, c: i32, n: usize) -> *mut u8 {
+    let mut i = 0;
+    while i < n {
+        *dest.add(i) = c as u8;
+        i += 1;
+    }
+    dest
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn memcmp(s1: *const u8, s2: *const u8, n: usize) -> i32 {
+    let mut i = 0;
+    while i < n {
+        let a = *s1.add(i);
+        let b = *s2.add(i);
+        if a != b {
+            return a as i32 - b as i32;
+        }
+        i += 1;
+    }
+    0
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn bcmp(s1: *const u8, s2: *const u8, n: usize) -> i32 {
+    memcmp(s1, s2, n)
+}
+
+// La libcore précompilée référence ce symbole pour le déroulage de pile
+// (unwinding) en cas de panic, même si notre crate compile en `panic =
+// "abort"` : ce n'est que la référence statique qui doit exister, la
+// fonction n'est jamais réellement appelée puisqu'on n'unwind jamais.
+#[no_mangle]
+pub extern "C" fn rust_eh_personality() {}
+
+#[no_mangle]
+pub unsafe extern "C" fn memmove(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+    if (dest as usize) < (src as usize) {
+        memcpy(dest, src, n)
+    } else {
+        let mut i = n;
+        while i != 0 {
+            i -= 1;
+            *dest.add(i) = *src.add(i);
+        }
+        dest
+    }
+}

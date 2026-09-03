@@ -47,6 +47,15 @@ précompilés), avec :
 - des implémentations maison de `memcpy`/`memset`/`memcmp`/`memmove`/
   `bcmp` et un `rust_eh_personality` bidon, parce que sur la cible hôte
   ces symboles sont normalement fournis par la libc, qu'on n'a pas ici.
+- `RUSTC_BOOTSTRAP=1` (dans `.cargo/config.toml`) : certains gestionnaires
+  d'interruption ont besoin de la convention d'appel spéciale
+  `extern "x86-interrupt"`, qui est une fonctionnalité **nightly**
+  (`#![feature(abi_x86_interrupt)]`) même si le compilateur qu'on utilise
+  est stable. Cette variable d'environnement débloque l'usage de
+  `#![feature(...)]` sur un compilateur stable — c'est un contournement
+  connu et largement utilisé (pas une bidouille exotique), mais ça reste
+  un pari sur une fonctionnalité non stabilisée, qui pourrait un jour
+  changer de comportement.
 
 Ça marche très bien pour ce qu'on fait (pas d'exceptions C++, pas de
 vraie divergence d'ABI), mais ce n'est pas la voie "canonique". Si un
@@ -98,12 +107,25 @@ Mac :
   le port série (des lettres `A`, `B`, `C`...) à chaque étape du boot :
   très utile pour savoir où ça plante si jamais l'écran reste noir.
 
+## État actuel
+
+- ✅ Boot multiboot -> long mode -> Rust, écran texte VGA (voir plus haut)
+- ✅ GDT + TSS (`src/gdt.rs`) : GDT 64-bit minimale + TSS avec une entrée
+  dans l'IST, pour donner au gestionnaire de double fault sa propre pile.
+  Sans ça, un débordement de la pile noyau ne pourrait pas être servi et
+  finirait en triple fault (reboot silencieux).
+- ✅ IDT (table des interruptions) : `src/interrupts.rs` gère `breakpoint`
+  (int3, déclenché volontairement au démarrage pour prouver que ça
+  marche) et `double_fault` (affiche un écran d'erreur, sur la pile IST
+  dédiée, au lieu de faire planter QEMU en boucle silencieusement).
+  Écran (`WRITER`) et port série (`SERIAL1`) sont maintenant des
+  instances globales uniques, protégées par un mutex (`spin::Mutex`) —
+  nécessaire dès qu'un gestionnaire d'interruption peut vouloir écrire à
+  l'écran en même temps que le code "normal".
+
 ## Prochaines étapes possibles
 
-- IDT + gestion des interruptions (indispensable avant de faire quoi que
-  ce soit de sérieux : sans ça, la moindre exception CPU = reboot
-  silencieux).
-- Pilote clavier PS/2 pour avoir une vraie boucle d'interaction.
+- Pilote clavier PS/2 (IRQ1) pour avoir une vraie boucle d'interaction.
 - Un allocateur mémoire (`#[global_allocator]`) pour débloquer `alloc`
   (`Vec`, `String`, etc.).
 - Un ordonnanceur minimal (coopératif d'abord) pour faire tourner

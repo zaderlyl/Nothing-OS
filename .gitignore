@@ -1,0 +1,10 @@
+/target
+/build
+.DS_Store
+/isodir
+/kernel.bin
+/toy-os.iso
+*.log
+*.ppm
+/*.png
+!docs/*.png

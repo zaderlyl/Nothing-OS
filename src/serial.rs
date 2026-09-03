@@ -21,6 +21,10 @@ unsafe fn inb(port: u16) -> u8 {
 pub struct SerialPort;
 
 impl SerialPort {
+    pub const fn new() -> SerialPort {
+        SerialPort
+    }
+
     fn line_status_ready(&self) -> bool {
         unsafe { inb(COM1 + 5) & 0x20 != 0 }
     }
@@ -40,6 +44,3 @@ impl fmt::Write for SerialPort {
     }
 }
 
-pub fn writer() -> SerialPort {
-    SerialPort
-}

@@ -34,7 +34,7 @@ pub enum Color {
 struct ColorCode(u8);
 
 impl ColorCode {
-    fn new(foreground: Color, background: Color) -> ColorCode {
+    const fn new(foreground: Color, background: Color) -> ColorCode {
         ColorCode((background as u8) << 4 | (foreground as u8))
     }
 }
@@ -45,6 +45,14 @@ struct ScreenChar {
     ascii_character: u8,
     color_code: u8,
 }
+
+// SAFETY: le pointeur `buffer` vise une adresse mémoire fixe (0xb8000),
+// pas de la mémoire allouée sur un thread en particulier ; l'accès
+// concurrent est de toute façon empêché par le mutex qui enveloppe ce
+// Writer (voir `crate::WRITER`), donc il est sûr de considérer ce type
+// comme Send + Sync.
+unsafe impl Send for Writer {}
+unsafe impl Sync for Writer {}
 
 pub struct Writer {
     column_position: usize,
@@ -143,15 +151,22 @@ impl fmt::Write for Writer {
     }
 }
 
-/// Construit un nouveau writer pointant sur le buffer VGA physique.
-/// # Safety
-/// Ne doit être appelé qu'une seule fois (ou alors uniquement depuis un
-/// contexte mono-thread, ce qui est notre cas au stade actuel du noyau).
-pub unsafe fn writer() -> Writer {
-    Writer {
-        column_position: 0,
-        row_position: 0,
-        color_code: ColorCode::new(Color::LightGreen, Color::Black),
-        buffer: VGA_BUFFER_ADDR as *mut ScreenChar,
+impl Writer {
+    /// Construit le writer pointant sur le buffer VGA physique.
+    ///
+    /// Ce n'est PAS marqué `unsafe` : construire la struct ne touche pas
+    /// encore à la mémoire (le pointeur n'est que calculé). C'est
+    /// pourquoi une seule instance doit exister dans tout le noyau,
+    /// partagée via `crate::WRITER` (protégée par un mutex) plutôt que
+    /// d'en recréer une à chaque endroit qui veut écrire à l'écran —
+    /// sinon chaque instance "oublie" où en étaient les autres et elles
+    /// s'écrasent mutuellement (position du curseur non partagée).
+    pub const fn new() -> Writer {
+        Writer {
+            column_position: 0,
+            row_position: 0,
+            color_code: ColorCode::new(Color::LightGreen, Color::Black),
+            buffer: VGA_BUFFER_ADDR as *mut ScreenChar,
+        }
     }
 }

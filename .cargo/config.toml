@@ -1,0 +1,10 @@
+[build]
+rustflags = ["-C", "relocation-model=static"]
+
+# Débloque `#![feature(abi_x86_interrupt)]` (et les autres `feature(...)`)
+# sur un compilateur *stable* : les gestionnaires d'interruption ont besoin
+# de la convention d'appel `extern "x86-interrupt"`, encore non stabilisée.
+# Contournement connu et largement utilisé — voir README, section
+# "Une bidouille assumée".
+[env]
+RUSTC_BOOTSTRAP = "1"

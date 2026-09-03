@@ -14,3 +14,7 @@ opt-level = 1
 [profile.release]
 panic = "abort"
 opt-level = 2
+
+[dependencies]
+spin = { version = "0.12.3", default-features = false, features = ["spin_mutex"] }
+x86_64 = { version = "0.15.5", default-features = false, features = ["instructions", "abi_x86_interrupt"] }
