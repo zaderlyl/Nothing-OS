@@ -321,7 +321,18 @@ fn draw_files(bx: i32, by: i32, bw: i32, _bh: i32) {
             // pastille = fichier du Mac (partage 9p)
             fb::fill_rect(cx + 46, cy + 2, 10, 10, P_STR);
         }
-        font::draw_str_scaled(cx, cy + 78, name, if dir { P_TEXT } else { P_DIM }, 2);
+        // nom tronqué pour tenir dans la colonne (~13 caractères)
+        let mut buf = [0u8; 16];
+        let nb = name.as_bytes();
+        let label: &str = if nb.len() <= 15 {
+            name
+        } else {
+            buf[..13].copy_from_slice(&nb[..13]);
+            buf[13] = b'.';
+            buf[14] = b'.';
+            core::str::from_utf8(&buf[..15]).unwrap_or(name)
+        };
+        font::draw_str_scaled(cx, cy + 78, label, if dir { P_TEXT } else { P_DIM }, 2);
         *i += 1;
     };
 
