@@ -178,21 +178,25 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
   DAC), via l'interface Bochs VBE de QEMU. L'adresse du framebuffer
   linéaire est lue dans le BAR0 PCI de la carte VGA ; `boot.asm`
   identity-mappe aussi le 4ᵉ GiB (0xC0000000..) pour l'atteindre.
-  Back-buffer, repeint incrémental (barre latérale mise en cache).
+  Back-buffer.
 - ✅ Base de temps (`src/time.rs`) : calibration du TSC contre le canal 2
-  du PIT (sans interruptions), pour un `now_secs()` flottant.
+  du PIT (sans interruptions), avec garde-fous (repli 1 GHz) pour ne
+  jamais renvoyer 0 et figer la boucle de rendu.
 - ✅ **Asti** (`src/asti.rs`) : portage direct du moteur de PC Pet
   (`renderer/engine.js` + `pet.js`). Buffer de luminance `f32` 25×25,
   primitives `disc` / `hole` / `stroke` identiques, `drawCreature` (mode
   visage : yeux + sourire + pose « il mange »), `renderToScreen` (boîtier,
   points éteints, 9 niveaux + halo), table `TINTS`. `Brain` planifie les
   micro-animations au repos (`blink`, regards) comme dans `pet.js`.
-- ✅ Souris PS/2 (`src/mouse.rs`) : en polling, curseur flèche.
+- ✅ Souris PS/2 (`src/mouse.rs`) : en polling, curseur flèche. Vide
+  aussi les octets clavier (sinon un octet coincé fige la souris).
 - ✅ Police (`src/font.rs`) : récupérée du plan 2 de la VRAM (celle du
-  BIOS) puis redessinée pixel par pixel.
-- ✅ Bureau (`src/home.rs`) : fond noir, barre latérale (tâches à faire
-  en haut, résumé mail/agenda/système + horloge CMOS `src/rtc.rs` en
-  bas), curseur. Asti est **toujours visible** en haut à droite.
+  BIOS) ; rendu normal, mis à l'échelle, ou en points (`draw_str_dots`).
+- ✅ Bureau (`src/home.rs`) : fond noir. Au centre « NOTHING OS » en
+  points + une barre de recherche (visuelle). La **barre latérale**
+  (tâches à faire, séparateur centré discret, résumé mail/agenda/système,
+  horloge CMOS `src/rtc.rs`) est **cachée** : elle glisse depuis la
+  gauche au frôlement du bord. Asti reste en haut à droite.
   `make run` lance QEMU en plein écran (`-full-screen`).
 - ✅ Étagère de friandises (`src/shelf.rs`) : 9 friandises dessinées en
   points (motifs de `treats.html`). **Cachée** par défaut ; se déplie
@@ -206,8 +210,10 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
   temps — c'est ce qui le rendra vraiment "vivant". (Il manque aussi une
   jauge visible du niveau de faim.)
 - Passer la souris (et le timer) en **interruptions** au lieu du polling.
-- **Pilote clavier PS/2 (IRQ1)** : une touche pour nourrir Asti
-  (`home::feed(...)`), première vraie interaction.
+- **Pilote clavier PS/2 (IRQ1)** : rendre la barre de recherche
+  fonctionnelle, et une touche pour nourrir Asti.
+- Rendre réels les contenus de la barre latérale (tâches, mail, agenda) —
+  actuellement des placeholders codés en dur.
 - Porter plus de poses/teintes de PC Pet (bâillement, sommeil la "nuit",
   réactions).
 - Un allocateur mémoire (`#[global_allocator]`) pour débloquer `alloc`
