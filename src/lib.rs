@@ -19,6 +19,7 @@
 extern crate alloc;
 
 mod ac97;
+mod apps;
 mod asti;
 mod ata;
 mod docview;
@@ -176,6 +177,7 @@ pub extern "C" fn rust_main() -> ! {
     asti::install_palette(asti::Tint::Null);
     home::install_palette();
     image::install_cube(); // palette 76..=255 = cube couleurs pour les images
+    apps::install_palette(); // palette 41..=49 = applis plein écran
 
     serial_println!("[nothing-os] mode graphique : bureau + Asti");
 

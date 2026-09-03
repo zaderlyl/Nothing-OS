@@ -188,10 +188,15 @@ fn run_command(cmd: &[u8], wm: &mut win::Manager) {
         None => (cmd, &b""[..]),
     };
     match verb {
-        b"/app" if !rest.is_empty() => {
-            let (k, t) = app_kind(rest);
-            let title: &[u8] = if t.is_empty() { rest } else { t };
-            wm.spawn(k, title, if k == win::App::Editor { b"" } else { rest });
+        b"/app" if rest.is_empty() => crate::apps::open_launcher(),
+        b"/app" => {
+            // appli plein écran (vscode / affinity / discord) sinon
+            // ancienne fenêtre (terminal / calc / editeur / hub)
+            if !crate::apps::launch_named(rest) {
+                let (k, t) = app_kind(rest);
+                let title: &[u8] = if t.is_empty() { rest } else { t };
+                wm.spawn(k, title, if k == win::App::Editor { b"" } else { rest });
+            }
         }
         b"/doc" | b"/document" | b"/documents" => {
             // panneau de consultation (glisse depuis la gauche), pas une
@@ -326,18 +331,23 @@ pub fn run(mut brain: asti::Brain) -> ! {
 
         let pressed = m.left && !click_latch;
 
-        // --- consultation de documents (panneaux glissants) ---
+        // --- applis plein écran + consultation de documents ---
         let scroll = mouse::take_scroll();
+        crate::apps::update(dt);
         crate::docview::update(dt);
         if scroll != 0 && crate::docview::active() {
             crate::docview::on_scroll(m.x, m.y, scroll);
         }
-        let dv_took = pressed && crate::docview::active() && crate::docview::on_click(m.x, m.y);
+        let apps_took = pressed && crate::apps::active() && crate::apps::on_click(m.x, m.y);
+        let dv_took = !apps_took
+            && pressed
+            && crate::docview::active()
+            && crate::docview::on_click(m.x, m.y);
 
         // --- fenêtres : la souris d'abord (focus / glisser / fermer) ---
-        let win_took_click = wm.on_mouse(m.x, m.y, m.left, pressed && !dv_took);
+        let win_took_click = wm.on_mouse(m.x, m.y, m.left, pressed && !dv_took && !apps_took);
         // clic ailleurs (pas sur une fenêtre) → le clavier revient à la barre
-        if pressed && !dv_took && !win_took_click {
+        if pressed && !dv_took && !apps_took && !win_took_click {
             wm.blur();
         }
 
@@ -348,11 +358,17 @@ pub fn run(mut brain: asti::Brain) -> ! {
                 break;
             }
             if c == 0x1b {
-                // Échap → ferme la consultation, sinon revient à la barre
-                if crate::docview::active() {
+                // Échap → ferme l'appli / la consultation, sinon barre
+                if crate::apps::active() {
+                    crate::apps::close();
+                } else if crate::docview::active() {
                     crate::docview::close_all();
                 }
                 wm.blur();
+                continue;
+            }
+            if crate::apps::running() {
+                crate::apps::on_key(c);
                 continue;
             }
             if wm.wants_keys() {
@@ -382,6 +398,8 @@ pub fn run(mut brain: asti::Brain) -> ! {
         // humeur + teinte d'Asti selon le contexte
         let (mood, tint) = if crate::ac97::playing() {
             (Some(asti::Pose::AppMusic), asti::Tint::Music)
+        } else if crate::apps::active() {
+            crate::apps::mood()
         } else if crate::docview::active() {
             (Some(asti::Pose::AppGit), asti::Tint::Git)
         } else {
@@ -405,7 +423,10 @@ pub fn run(mut brain: asti::Brain) -> ! {
         };
         let over_shelf = shelf_out > 0.3
             && (shelf::hit(m.x, m.y, now).is_some() || shelf::info_hit(m.x, m.y));
-        if (over_asti || over_shelf || drag.is_some()) && !crate::docview::active() {
+        if (over_asti || over_shelf || drag.is_some())
+            && !crate::docview::active()
+            && !crate::apps::running()
+        {
             shelf_leave = now;
         }
         let want = if now - shelf_leave < 0.5 { 1.0 } else { 0.0 };
@@ -455,19 +476,25 @@ pub fn run(mut brain: asti::Brain) -> ! {
         let input_str = core::str::from_utf8(&input[..ilen]).unwrap_or("");
 
         fb::clear(0);
-        draw_hero(now, input_str);
-        if side_out > 0.01 {
-            draw_sidebar(lerp(-(SIDE_W as f32) - 4.0, 0.0, side_out) as i32);
+        let app_full = crate::apps::running();
+        if !app_full {
+            draw_hero(now, input_str);
+            if side_out > 0.01 {
+                draw_sidebar(lerp(-(SIDE_W as f32) - 4.0, 0.0, side_out) as i32);
+            }
+            wm.draw(now); // fenêtres
+            crate::docview::draw(now); // panneaux de consultation
         }
-        wm.draw(now); // fenêtres
-        crate::docview::draw(now); // panneaux de consultation, au-dessus des fenêtres
-        if shelf_out > 0.03 && !crate::docview::active() {
+        crate::apps::draw(now); // appli plein écran OU panneau de choix
+        if !app_full && shelf_out > 0.03 && !crate::docview::active() {
             shelf::draw(shelf_out, now);
         }
         asti::render(&cv, asti::HOME_OX); // Asti par-dessus TOUT
         if let Some(kind) = drag {
-            let (tw, th) = shelf::treat_size(kind, 5);
-            shelf::draw_treat_at(kind, m.x - tw / 2, m.y - th / 2, 5);
+            if !app_full {
+                let (tw, th) = shelf::treat_size(kind, 5);
+                shelf::draw_treat_at(kind, m.x - tw / 2, m.y - th / 2, 5);
+            }
         }
         mouse::draw_cursor(m.x, m.y, PAL_CURSOR, PAL_CURSOR_EDGE, 3, m.left && drag.is_none());
         fb::present();

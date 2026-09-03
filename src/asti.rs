@@ -426,6 +426,7 @@ pub enum Pose {
     AppGit,
     AppWeb,
     AppMusic,
+    AppArt,
     Hub,
 }
 
@@ -749,6 +750,15 @@ pub fn draw_creature(cv: &mut Canvas, s: &State, t: f32) {
                 mouth = Mouth::Line;
                 look_v = 0.2 + sinf(t * 0.6) * 0.25;
                 tilt = sinf(t * 0.35) * 0.03;
+            }
+            // dessin (Affinity) : concentration, œil qui vise, "langue tirée",
+            // la main va-et-vient (scène 'affinity' de PC Pet).
+            Pose::AppArt => {
+                eye = EyeStyle::Squint;
+                mouth = Mouth::Cat;
+                look_v = 0.7;
+                look_h = sinf(t * 2.4) * 0.9;
+                tilt = sinf(t * 0.6) * 0.04;
             }
             Pose::AppWeb => {
                 eye = EyeStyle::Dot;
