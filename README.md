@@ -167,10 +167,19 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
   nécessaire dès qu'un gestionnaire d'interruption peut vouloir écrire à
   l'écran en même temps que le code "normal".
 - ✅ Écran d'accueil (`src/home.rs`) : fond noir, nom de l'OS, personnage
-  **Asti** en art ASCII, et **barre de nourriture** (`Nourriture [██░░] 62%`,
-  couleur verte/jaune/rouge selon le niveau). Dessiné une fois au boot.
-  Le niveau de nourriture est un `AtomicU8` (`FOOD`) avec l'API
-  `food()` / `set_food()` / `feed()` / `starve()` prête pour la suite.
+  **Asti**, et **barre de nourriture** (`Nourriture [██░░] 62%`, couleur
+  verte/jaune/rouge selon le niveau). Dessiné une fois au boot.
+  - Asti est rendu comme dans l'appli d'origine « PC Pet » : une matrice
+    de LED circulaire 25×25. Le tracé se fait dans un buffer de luminance
+    `f32` (primitives `disc` / `stroke` portées telles quelles depuis le
+    moteur de PC Pet, géométrie du visage identique), puis chaque point
+    devient une cellule texte VGA (`■`, 0xFE) — points ternes pour le
+    disque, points blancs pour les yeux et le sourire.
+  - `src/vga.rs` : `put_cell()` (écriture d'une cellule brute) et
+    `disable_blink()` (le bit 7 de l'attribut redevient "fond haute
+    intensité", nécessaire pour les fonds clairs).
+  - Le niveau de nourriture est un `AtomicU8` (`FOOD`) avec l'API
+    `food()` / `set_food()` / `feed()` / `starve()` prête pour la suite.
 
 ## Prochaines étapes possibles
 

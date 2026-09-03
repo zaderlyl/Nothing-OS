@@ -95,6 +95,15 @@ pub fn put_raw(byte: u8, count: usize) {
     });
 }
 
+/// Écrit une cellule brute (caractère + couleurs avant/arrière) à une
+/// position absolue, sans bouger le curseur. Utilisé par `home` pour le
+/// rendu d'Asti en demi-blocs.
+pub fn put_cell(row: usize, col: usize, ch: u8, fg: vga::Color, bg: vga::Color) {
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        WRITER.lock().put_cell(row, col, ch, fg, bg);
+    });
+}
+
 /// Écrit à l'écran (buffer texte VGA), comme `print!` en std.
 #[macro_export]
 macro_rules! print {
@@ -146,6 +155,7 @@ pub extern "C" fn rust_main() -> ! {
     x86_64::instructions::interrupts::int3();
     serial_println!("[nothing-os] IDT ok, affichage de l'ecran d'accueil");
 
+    vga::disable_blink();
     home::render();
 
     serial_println!("[nothing-os] accueil affiche, mise en boucle hlt");
