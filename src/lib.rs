@@ -276,6 +276,16 @@ pub unsafe extern "C" fn strlen(s: *const u8) -> usize {
     n
 }
 
+// minimp3 (compilé en C, cf. cshim/) référence `abs`.
+#[no_mangle]
+pub extern "C" fn abs(x: i32) -> i32 {
+    if x < 0 {
+        x.wrapping_neg()
+    } else {
+        x
+    }
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn memmove(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
     if (dest as usize) < (src as usize) {

@@ -31,6 +31,12 @@ RUSTUP_CARGO := $(shell rustup which cargo 2>/dev/null)
 CARGO        := $(if $(RUSTUP_CARGO),$(RUSTUP_CARGO),cargo)
 CARGO_ENV    := $(if $(RUSTUP_CARGO),PATH="$(dir $(RUSTUP_CARGO)):$$PATH",)
 
+# minimp3 (crate rmp3) est du C : on le compile en cross-target avec
+# clang, en pointant vers des en-têtes bouchons (cshim/) puisqu'il n'y a
+# pas de sysroot Linux. Les symboles mem*/abs viennent du noyau.
+CC_ENV := CC_x86_64_unknown_linux_gnu=clang \
+  CFLAGS_x86_64_unknown_linux_gnu="--target=x86_64-unknown-linux-gnu -ffreestanding -fno-stack-protector -isystem $(CURDIR)/cshim"
+
 # Cible Rust : on compile pour x86_64 Linux (core/std précompilés, dispo
 # via `rustup target add x86_64-unknown-linux-gnu`) même sur un Mac ARM.
 TARGET     := x86_64-unknown-linux-gnu
@@ -69,7 +75,7 @@ QEMU_SND   := -audiodev $(AUDIODEV) -device AC97,audiodev=snd
 all: $(KERNEL_BIN)
 
 kernel:
-	$(CARGO_ENV) $(CARGO) build --release --target $(TARGET)
+	$(CARGO_ENV) $(CC_ENV) $(CARGO) build --release --target $(TARGET)
 
 # disque persistant : créé une fois s'il n'existe pas
 $(DISK):
