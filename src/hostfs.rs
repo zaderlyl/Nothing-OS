@@ -122,10 +122,6 @@ pub fn sync() {
     }
 }
 
-pub fn is_linked(slot: usize) -> bool {
-    unsafe { LINKS.iter().any(|l| l.slot == slot) }
-}
-
 /// Recharge la liste de la racine du partage (pour l'appli Fichiers).
 pub fn refresh_dir() {
     if !p9::present() {

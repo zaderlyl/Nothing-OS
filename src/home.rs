@@ -117,7 +117,7 @@ fn draw_hero(now: f32, input: &str) {
     let tx0 = bx + 52;
     let ty0 = by + bh / 2 - 8;
     if input.is_empty() {
-        font::draw_str_scaled(tx0, ty0, "Rechercher   /app  /document  /fichier  /web", PAL_TEXT_DIM, 2);
+        font::draw_str_scaled(tx0, ty0, "Rechercher   /app  /doc  /fichier  /web", PAL_TEXT_DIM, 2);
     } else {
         font::draw_str_scaled(tx0, ty0, input, PAL_TEXT, 2);
     }
@@ -193,9 +193,10 @@ fn run_command(cmd: &[u8], wm: &mut win::Manager) {
             let title: &[u8] = if t.is_empty() { rest } else { t };
             wm.spawn(k, title, if k == win::App::Editor { b"" } else { rest });
         }
-        b"/document" | b"/documents" => {
-            crate::hostfs::refresh_dir();
-            wm.spawn(win::App::Files, b"Fichiers", rest);
+        b"/doc" | b"/document" | b"/documents" => {
+            // panneau de consultation (glisse depuis la gauche), pas une
+            // fenêtre classique. `/doc all` = racine du partage.
+            crate::docview::open_list();
         }
         b"/fichier" if !rest.is_empty() => {
             // d'abord un vrai fichier du Mac (partage 9p) ; sinon local
@@ -211,7 +212,7 @@ fn run_command(cmd: &[u8], wm: &mut win::Manager) {
         }
         b"/web" if !rest.is_empty() => wm.spawn(win::App::Web, b"Recherche", rest),
         b"/terminal" | b"/term" => wm.spawn(win::App::Terminal, b"Terminal", b""),
-        b"/aide" | b"/help" => wm.spawn(win::App::Unknown, b"Aide", b"/app /document /fichier /web /terminal"),
+        b"/aide" | b"/help" => wm.spawn(win::App::Unknown, b"Aide", b"/app /doc /fichier /web /terminal"),
         _ => {}
     }
     crate::serial_println!(
@@ -324,10 +325,18 @@ pub fn run(mut brain: asti::Brain) -> ! {
 
         let pressed = m.left && !click_latch;
 
+        // --- consultation de documents (panneaux glissants) ---
+        let scroll = mouse::take_scroll();
+        crate::docview::update(dt);
+        if scroll != 0 && crate::docview::active() {
+            crate::docview::on_scroll(m.x, m.y, scroll);
+        }
+        let dv_took = pressed && crate::docview::active() && crate::docview::on_click(m.x, m.y);
+
         // --- fenêtres : la souris d'abord (focus / glisser / fermer) ---
-        let win_took_click = wm.on_mouse(m.x, m.y, m.left, pressed);
+        let win_took_click = wm.on_mouse(m.x, m.y, m.left, pressed && !dv_took);
         // clic ailleurs (pas sur une fenêtre) → le clavier revient à la barre
-        if pressed && !win_took_click {
+        if pressed && !dv_took && !win_took_click {
             wm.blur();
         }
 
@@ -338,7 +347,11 @@ pub fn run(mut brain: asti::Brain) -> ! {
                 break;
             }
             if c == 0x1b {
-                wm.blur(); // Échap → revient à la barre de commande
+                // Échap → ferme la consultation, sinon revient à la barre
+                if crate::docview::active() {
+                    crate::docview::close_all();
+                }
+                wm.blur();
                 continue;
             }
             if wm.wants_keys() {
@@ -366,9 +379,13 @@ pub fn run(mut brain: asti::Brain) -> ! {
         }
 
         // humeur + teinte d'Asti selon la fenêtre au premier plan
-        let (mood, tint) = match wm.focused_app() {
-            Some(a) => app_mood(a),
-            None => (None, asti::Tint::Null),
+        let (mood, tint) = if crate::docview::active() {
+            (Some(asti::Pose::AppGit), asti::Tint::Git)
+        } else {
+            match wm.focused_app() {
+                Some(a) => app_mood(a),
+                None => (None, asti::Tint::Null),
+            }
         };
         brain.set_app(mood);
         if tint != cur_tint {
@@ -385,16 +402,18 @@ pub fn run(mut brain: asti::Brain) -> ! {
         };
         let over_shelf = shelf_out > 0.3
             && (shelf::hit(m.x, m.y, now).is_some() || shelf::info_hit(m.x, m.y));
-        if over_asti || over_shelf || drag.is_some() {
+        if (over_asti || over_shelf || drag.is_some()) && !crate::docview::active() {
             shelf_leave = now;
         }
         let want = if now - shelf_leave < 0.5 { 1.0 } else { 0.0 };
         shelf_out += (want - shelf_out) * (1.0 - libm::powf(0.5, dt * 8.0));
         shelf_out = shelf_out.clamp(0.0, 1.0);
 
-        // --- barre latérale : souris au bord gauche ---
+        // --- barre latérale : souris au bord gauche (masquée si un
+        //     panneau de documents occupe déjà la gauche) ---
         let side_x = lerp(-(SIDE_W as f32) - 4.0, 0.0, side_out) as i32;
-        let near_left = m.x < 18 || (side_out > 0.15 && m.x < side_x + SIDE_W + 8);
+        let near_left = !crate::docview::left_covering()
+            && (m.x < 18 || (side_out > 0.15 && m.x < side_x + SIDE_W + 8));
         if near_left {
             side_leave = now;
         }
@@ -438,7 +457,8 @@ pub fn run(mut brain: asti::Brain) -> ! {
             draw_sidebar(lerp(-(SIDE_W as f32) - 4.0, 0.0, side_out) as i32);
         }
         wm.draw(now); // fenêtres
-        if shelf_out > 0.03 {
+        crate::docview::draw(now); // panneaux de consultation, au-dessus des fenêtres
+        if shelf_out > 0.03 && !crate::docview::active() {
             shelf::draw(shelf_out, now);
         }
         asti::render(&cv, asti::HOME_OX); // Asti par-dessus TOUT

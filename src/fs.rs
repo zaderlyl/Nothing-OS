@@ -68,7 +68,7 @@ pub fn init() {
     seed(
         b"bienvenue.txt",
         false,
-        b"Bienvenue dans Nothing OS.\n\nTout se fait a la commande :\n  /app terminal    un shell (ls, cat, edit, mkdir...)\n  /app editeur     editeur de texte\n  /fichier <nom>   ouvre un fichier dans l'editeur\n  /document        liste les fichiers\n  /web <mots>      recherche dans les fichiers (hors-ligne)\n\nAsti reste toujours au-dessus. Glisse-lui une friandise.\n",
+        b"Bienvenue dans Nothing OS.\n\nTout se fait a la commande :\n  /app terminal    un shell (ls, cat, edit, mkdir...)\n  /app editeur     editeur de texte\n  /fichier <nom>   ouvre un fichier dans l'editeur\n  /doc all         consulte les documents (panneau)\n  /web <mots>      recherche dans les fichiers (hors-ligne)\n\nAsti reste toujours au-dessus. Glisse-lui une friandise.\n",
     );
     seed(
         b"notes.txt",

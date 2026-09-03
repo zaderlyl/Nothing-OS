@@ -18,7 +18,7 @@ pub const P_TEXT: u8 = 68;
 pub const P_DIM: u8 = 69;
 pub const P_ACCENT: u8 = 70;
 pub const P_CODE_BG: u8 = 71;
-const P_STR: u8 = 73;
+pub const P_STR: u8 = 73;
 pub const P_CLOSE: u8 = 75;
 
 pub fn install_palette() {
@@ -312,7 +312,7 @@ fn draw_files(bx: i32, by: i32, bw: i32, _bh: i32) {
     let cols = ((bw - 40) / 190).max(1);
     let mut i = 0i32;
 
-    let mut tile = |name: &str, dir: bool, host: bool, i: &mut i32| {
+    let tile = |name: &str, dir: bool, host: bool, i: &mut i32| {
         let cx = bx + 24 + (*i % cols) * 190;
         let cy = by + 64 + (*i / cols) * 120;
         let pat = if dir { dots::FOLDER } else { dots::FILE };

@@ -20,6 +20,7 @@ extern crate alloc;
 
 mod asti;
 mod ata;
+mod docview;
 mod dots;
 mod editor;
 mod fb;

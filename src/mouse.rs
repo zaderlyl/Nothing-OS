@@ -69,6 +69,19 @@ static mut Y: i32 = (fb::HEIGHT / 2) as i32;
 static mut LEFT: bool = false;
 static mut RIGHT: bool = false;
 static mut PACKETS: u32 = 0;
+static mut WHEEL: bool = false; // molette (IntelliMouse) détectée ?
+static mut PSIZE: usize = 3; // taille de paquet : 3, ou 4 avec molette
+static mut SCROLL_ACC: i32 = 0; // crans de molette accumulés (crans, signés)
+
+/// Renvoie les crans de molette accumulés depuis le dernier appel, puis
+/// remet le compteur à zéro. Positif = vers le haut.
+pub fn take_scroll() -> i32 {
+    unsafe {
+        let v = SCROLL_ACC;
+        SCROLL_ACC = 0;
+        v
+    }
+}
 
 /// Nombre de paquets souris reçus depuis le boot (diagnostic).
 #[allow(dead_code)]
@@ -76,9 +89,33 @@ pub fn packets() -> u32 {
     unsafe { PACKETS }
 }
 
-// assemblage des paquets de 3 octets
-static mut PKT: [u8; 3] = [0; 3];
+// assemblage des paquets (3 octets, ou 4 avec la molette)
+static mut PKT: [u8; 4] = [0; 4];
 static mut PHASE: usize = 0;
+
+/// Règle la cadence d'échantillonnage de la souris (commande 0xF3).
+fn set_sample_rate(hz: u8) {
+    mouse_cmd(0xf3);
+    mouse_cmd(hz);
+}
+
+/// Commande 0xF2 (Get Device ID) : renvoie l'octet d'identité (3 = molette).
+fn read_id() -> u8 {
+    wait_input_clear();
+    unsafe { outb(CMD, 0xd4) }
+    wait_input_clear();
+    unsafe { outb(DATA, 0xf2) }
+    if wait_output_full() {
+        unsafe {
+            let _ = inb(DATA);
+        }
+    } // ACK 0xFA
+    if wait_output_full() {
+        unsafe { inb(DATA) }
+    } else {
+        0
+    }
+}
 
 fn flush() {
     for _ in 0..4096 {
@@ -128,14 +165,28 @@ pub fn init() {
     }
 
     let defaults = mouse_cmd(0xf6); // réglages par défaut (100 Hz, échelle 1:1)
+
+    // "toc toc" IntelliMouse : 200, puis 100, puis 80 Hz → si la souris a
+    // une molette, elle passe en identité 3 et envoie des paquets de 4 o.
+    set_sample_rate(200);
+    set_sample_rate(100);
+    set_sample_rate(80);
+    let id = read_id();
+    unsafe {
+        WHEEL = id == 3;
+        PSIZE = if WHEEL { 4 } else { 3 };
+    }
+    set_sample_rate(100); // cadence de croisière
+
     let enable = mouse_cmd(0xf4); // active le flux de paquets
 
     flush();
     crate::serial_println!(
-        "[nothing-os] souris PS/2 : reset={:#x} defaults={:#x} enable={:#x}",
+        "[nothing-os] souris PS/2 : reset={:#x} defaults={:#x} enable={:#x} molette={}",
         reset,
         defaults,
-        enable
+        enable,
+        unsafe { WHEEL }
     );
 }
 
@@ -165,11 +216,16 @@ pub fn poll() {
             }
             PKT[PHASE] = b;
             PHASE += 1;
-            if PHASE == 3 {
+            if PHASE == PSIZE {
                 PHASE = 0;
                 if PKT[0] & 0x08 != 0 {
                     PACKETS += 1;
                     apply(PKT[0], PKT[1], PKT[2]);
+                    if WHEEL {
+                        // Z : bits 0-3 signés (crans de molette)
+                        let z = ((PKT[3] << 4) as i8) >> 4;
+                        SCROLL_ACC += -(z as i32); // molette vers le haut = positif
+                    }
                 }
             }
         }
