@@ -11,8 +11,8 @@ commande** :
 | `/app terminal` | un vrai terminal (`ls`, `cat`, `echo`, `mkdir`, `write`, `rm`, `date`...) |
 | `/app editeur` | un vrai éditeur de texte |
 | `/app calc` | une calculatrice |
-| `/fichier <nom>` | ouvre (ou crée) le fichier dans l'éditeur |
-| `/document` | liste les fichiers |
+| `/fichier <nom>` | ouvre (ou crée) le fichier dans l'éditeur — sur le Mac si le partage 9p est présent |
+| `/document` | liste les fichiers (partage du Mac + fichiers RAM) |
 | `/web <mots>` | recherche **locale** dans les fichiers (pas de réseau) |
 
 Les fichiers vivent dans un **système de fichiers** (`src/fs.rs`) rendu
@@ -21,6 +21,19 @@ Les fichiers vivent dans un **système de fichiers** (`src/fs.rs`) rendu
 disque dur (pilote ATA, `src/ata.rs`). Les fichiers survivent au
 redémarrage de Nothing OS. Éditer un fichier dans l'éditeur puis faire
 `cat` dans le terminal : c'est le même fichier.
+
+**Partage de dossier avec le Mac (virtio-9p).** `make run` expose aussi
+`~/Documents` du Mac au noyau via `-fsdev`/`virtio-9p-pci` (transport
+virtio *legacy*, `src/virtio.rs` ; scan PCI `src/pci.rs` ; client
+9P2000.L `src/p9.rs`). `src/hostfs.rs` fait le pont : `/fichier notes.md`
+lit le vrai fichier du Mac dans l'éditeur, et toute modification est
+**réécrite sur le Mac** (toutes les 2 s et à la fermeture). Un fichier
+qui n'existe pas encore est créé côté Mac. `/document` liste le partage.
+Changer le dossier partagé : `make run SHARE=~/mon-dossier`. Limites
+actuelles : lecture plafonnée à `fs::FCAP` (12 Kio, les fichiers plus
+gros sont ouverts en lecture seule), pas de sous-dossiers dans l'appli
+Fichiers, collision si deux fichiers de dossiers différents ont le même
+nom.
 
 À gauche, une barre latérale cachée (tâches, résumé, heure) qui glisse au
 frôlement du bord. En haut à droite, **Asti** — le compagnon, un portage
@@ -36,7 +49,7 @@ donne le focus à une fenêtre.
 Côté technique, c'est l'alternative "raisonnable" à un vrai OS complet :
 pas de pilotes matériels réels, pas de multi-tâche, juste assez de
 plomberie bas niveau (boot PVH/multiboot, mode 64-bit, GDT, IDT,
-framebuffer 640×480, souris PS/2) pour avoir un vrai noyau qui démarre,
+framebuffer 1920×1080, souris PS/2) pour avoir un vrai noyau qui démarre,
 avec une base saine pour ajouter des trucs petit à petit.
 
 *(Captures réelles : `make run` sur un Mac Apple Silicon, QEMU via boot PVH.)*
@@ -240,18 +253,24 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
 - ✅ Terminal (`src/term.rs`) : mini shell réel qui agit sur le fs.
 - ✅ Éditeur de texte (`src/editor.rs`) : édition réelle (curseur,
   flèches, multi-lignes), écrit dans le fichier fs directement.
+- ✅ Allocateur de tas (`src/heap.rs`) : 16 Mio en `.bss`,
+  `linked_list_allocator` → `Vec` / `String` / `Box` disponibles.
+- ✅ Partage 9p (`src/pci.rs`, `src/virtio.rs`, `src/p9.rs`,
+  `src/hostfs.rs`) : `~/Documents` du Mac lu/écrit depuis Nothing OS via
+  `/fichier` et `/document`.
 
 ## Prochaines étapes possibles
 
-- **Partage 9p** : voir un vrai dossier du Mac depuis Nothing OS (virtio-9p).
+- **Pont web** : un petit assistant côté Mac qui rend une page et la
+  renvoie au noyau par 9p (pour `/web`).
+- **Lancement en kiosque** : démarrer Nothing OS directement à
+  l'allumage.
 - **Timer (PIT, IRQ0)** : faim d'Asti qui descend + jauge visible.
 - Souris / clavier / timer en **interruptions** au lieu du polling.
 - Sauvegarde explicite dans l'éditeur (Ctrl+S), copier/coller, molette.
 - Redimensionner les fenêtres, une vraie barre des tâches.
 - Porter plus de poses/teintes de PC Pet (bâillement, sommeil la "nuit",
   réactions).
-- Un allocateur mémoire (`#[global_allocator]`) pour débloquer `alloc`
-  (`Vec`, `String`, etc.).
 - Un ordonnanceur minimal (coopératif d'abord) pour faire tourner
   plusieurs "tâches".
 - Basculer sur une vraie cible bare-metal + nightly (voir plus haut) une
