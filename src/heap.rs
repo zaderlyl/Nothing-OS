@@ -1,16 +1,20 @@
 //! Allocateur de tas. Débloque `alloc` : `Vec`, `String`, `Box`,
 //! `BTreeMap`... indispensable pour la suite (partage 9p, HTTP, FAT).
 //!
-//! Le tas est une zone statique de 16 Mio dans le `.bss` du noyau (donc
-//! dans le premier Gio déjà identity-mappé). Allocateur à liste chaînée
-//! (crate `linked_list_allocator`) : gère la libération et la
-//! réutilisation, contrairement à un simple bump.
+//! Le tas est une zone statique dans le `.bss` du noyau (donc dans le
+//! premier Gio déjà identity-mappé). Allocateur à liste chaînée (crate
+//! `linked_list_allocator`) : gère la libération et la réutilisation,
+//! contrairement à un simple bump.
+//!
+//! 160 Mio : il faut de la marge pour décoder une image (un PNG/JPEG
+//! décompressé peut peser ~100 Mio le temps de le réduire pour l'aperçu
+//! — voir `src/image.rs`). Le Makefile démarre QEMU avec `-m 1G`.
 
 use core::alloc::Layout;
 
 use linked_list_allocator::LockedHeap;
 
-const HEAP_SIZE: usize = 16 * 1024 * 1024;
+const HEAP_SIZE: usize = 160 * 1024 * 1024;
 
 static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
 

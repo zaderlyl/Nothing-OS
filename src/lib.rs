@@ -30,6 +30,7 @@ mod gdt;
 mod heap;
 mod home;
 mod hostfs;
+mod image;
 mod interrupts;
 mod kbd;
 mod mouse;
@@ -169,6 +170,7 @@ pub extern "C" fn rust_main() -> ! {
     fb::init();
     asti::install_palette(asti::Tint::Null);
     home::install_palette();
+    image::install_cube(); // palette 76..=255 = cube couleurs pour les images
 
     serial_println!("[nothing-os] mode graphique : bureau + Asti");
 

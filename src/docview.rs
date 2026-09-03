@@ -47,6 +47,19 @@ static mut CONTENT_NAME: String = String::new();
 /// Sous-dossier courant dans le partage Mac ("" = racine).
 static mut CWD: String = String::new();
 
+/// Nature du panneau droit.
+#[derive(PartialEq)]
+enum View {
+    Text,
+    Image,
+    Message, // erreur / format non géré → VIEW_MSG
+}
+static mut VIEW: View = View::Text;
+static mut VIEW_MSG: String = String::new();
+static mut IMG_W: i32 = 0;
+static mut IMG_H: i32 = 0;
+static mut IMG_PX: Vec<u8> = Vec::new();
+
 pub fn active() -> bool {
     unsafe { L_ON || R_ON || L_OUT > 0.01 || R_OUT > 0.01 }
 }
@@ -205,8 +218,13 @@ fn list_content_h() -> i32 {
 }
 
 fn view_content_h() -> i32 {
-    // hauteur du texte rendu (lignes repliées)
-    unsafe { wrapped_lines(&CONTENT) as i32 * (16 + 6) }
+    unsafe {
+        match VIEW {
+            View::Image => IMG_H + 24,
+            View::Message => 0,
+            View::Text => wrapped_lines(&CONTENT) as i32 * (16 + 6),
+        }
+    }
 }
 
 fn clamp_scrolls() {
@@ -286,7 +304,13 @@ fn load_content() {
     unsafe {
         let e = &ENTRIES[SEL as usize];
         let name = e.name.clone();
-        let mut data = if e.host {
+        let host = e.host;
+        CONTENT_NAME = name.clone();
+        CONTENT = Vec::new();
+        IMG_PX = Vec::new();
+        VIEW_MSG = String::new();
+
+        let full = if host {
             p9::read_file(&full_path(&name)).unwrap_or_default()
         } else {
             match fs::find(name.as_bytes()) {
@@ -294,13 +318,50 @@ fn load_content() {
                 None => Vec::new(),
             }
         };
-        data.truncate(32 * 1024); // aperçu : on plafonne l'affichage
-        CONTENT = data;
-        CONTENT_NAME = name;
+
+        match crate::image::kind_of(&name) {
+            Some(kind) => {
+                let max_w = PW - 2 * PADX;
+                let max_h = H - HEADER_H - 24;
+                match crate::image::decode_fit(&full, kind, max_w, max_h) {
+                    Ok(bm) => {
+                        IMG_W = bm.w;
+                        IMG_H = bm.h;
+                        IMG_PX = bm.px;
+                        VIEW = View::Image;
+                        crate::serial_println!("[doc] image {} : {}x{}", name, bm.w, bm.h);
+                    }
+                    Err(msg) => {
+                        VIEW_MSG = String::from(msg);
+                        VIEW = View::Message;
+                        crate::serial_println!("[doc] image {} : {}", name, msg);
+                    }
+                }
+            }
+            None if is_svg(&name) => {
+                VIEW_MSG = String::from("SVG : rendu non disponible (source ci-dessous)");
+                let mut d = full;
+                d.truncate(32 * 1024);
+                CONTENT = d;
+                VIEW = View::Text;
+            }
+            None => {
+                let mut d = full;
+                d.truncate(32 * 1024);
+                CONTENT = d;
+                VIEW = View::Text;
+                crate::serial_println!("[doc] ouvre {} ({} o)", name, CONTENT.len());
+            }
+        }
     }
-    crate::serial_println!("[doc] ouvre {} ({} o)", unsafe { &CONTENT_NAME }, unsafe {
-        CONTENT.len()
-    });
+}
+
+fn is_svg(name: &str) -> bool {
+    let e = match name.rsplit('.').next() {
+        Some(e) => e,
+        None => return false,
+    };
+    e.len() == 3 && e.bytes().zip(b"svg").all(|(c, &d)| c.to_ascii_lowercase() == d)
 }
 
 // --- rendu -------------------------------------------------------------
@@ -449,33 +510,49 @@ fn draw_right(rx: i32) {
     fb::fill_rect(rx, 0, PW, H, P_CODE_BG);
     fb::fill_rect(rx, 0, 3, H, P_FRAME);
 
-    let cols = ((PW - 2 * PADX) / 16).max(1) as usize;
-    let mut x = rx + PADX;
-    let mut y = HEADER_H + 6 - unsafe { R_SCROLL };
-    let mut c = 0usize;
-    for &b in unsafe { &CONTENT } {
-        if b == b'\n' {
-            y += 22;
-            x = rx + PADX;
-            c = 0;
-            continue;
+    match unsafe { &VIEW } {
+        View::Image => draw_image(rx),
+        View::Message => {
+            let msg = unsafe { &VIEW_MSG };
+            let w = font::width_scaled(msg, 2);
+            font::draw_str_scaled(rx + (PW - w) / 2, H / 2 - 16, msg, P_DIM, 2);
         }
-        let ch = if b == b'\t' { b' ' } else { b };
-        if (0x20..=0x7e).contains(&ch) {
-            if y + 16 > HEADER_H && y < H {
-                font::draw_char_scaled(x, y, ch, P_TEXT, None, 2);
-            }
-            x += 16;
-            c += 1;
-            if c >= cols {
+        View::Text => {
+            let cols = ((PW - 2 * PADX) / 16).max(1) as usize;
+            let mut x = rx + PADX;
+            let mut y = HEADER_H + 6 - unsafe { R_SCROLL };
+            let mut c = 0usize;
+            // bandeau "source SVG" éventuel
+            let svg_note = unsafe { !VIEW_MSG.is_empty() && is_svg(&CONTENT_NAME) };
+            if svg_note {
+                font::draw_str_scaled(rx + PADX, y, unsafe { &VIEW_MSG }, P_ACCENT, 1);
                 y += 22;
-                x = rx + PADX;
-                c = 0;
+            }
+            for &b in unsafe { &CONTENT } {
+                if b == b'\n' {
+                    y += 22;
+                    x = rx + PADX;
+                    c = 0;
+                    continue;
+                }
+                let ch = if b == b'\t' { b' ' } else { b };
+                if (0x20..=0x7e).contains(&ch) {
+                    if y + 16 > HEADER_H && y < H {
+                        font::draw_char_scaled(x, y, ch, P_TEXT, None, 2);
+                    }
+                    x += 16;
+                    c += 1;
+                    if c >= cols {
+                        y += 22;
+                        x = rx + PADX;
+                        c = 0;
+                    }
+                }
             }
         }
     }
 
-    // en-tête (par-dessus le texte)
+    // en-tête (par-dessus le contenu)
     fb::fill_rect(rx, 0, PW, HEADER_H, P_TITLE_HI);
     fb::fill_rect(rx, HEADER_H - 2, PW, 2, P_FRAME);
     dots::draw(dots::FILE, rx + PADX, 26, 4, P_TEXT, P_DIM);
@@ -484,6 +561,32 @@ fn draw_right(rx: i32) {
     font::draw_str_scaled(rx + PADX + 64, 30, name, P_TEXT, 3);
 
     scrollbar(rx + 2, view_content_h(), unsafe { R_SCROLL });
+}
+
+fn draw_image(rx: i32) {
+    let (w, h) = unsafe { (IMG_W, IMG_H) };
+    if w <= 0 || h <= 0 {
+        return;
+    }
+    let ox = rx + (PW - w) / 2;
+    let avail = H - HEADER_H;
+    let oy = if h <= avail {
+        HEADER_H + (avail - h) / 2
+    } else {
+        HEADER_H + 12 - unsafe { R_SCROLL }
+    };
+    // damier léger derrière (transparence éventuelle)
+    let px = unsafe { &IMG_PX };
+    for j in 0..h {
+        let sy = oy + j;
+        if sy < HEADER_H || sy >= H {
+            continue;
+        }
+        let row = (j * w) as usize;
+        for i in 0..w {
+            fb::put(ox + i, sy, px[row + i as usize]);
+        }
+    }
 }
 
 fn scrollbar(x: i32, content_h: i32, scroll: i32) {

@@ -18,5 +18,8 @@ opt-level = 2
 [dependencies]
 libm = "0.2"
 linked_list_allocator = "0.10"
+zune-core = { version = "0.4", default-features = false }
+zune-png = { version = "0.4", default-features = false }
+zune-jpeg = { version = "0.4", default-features = false }
 spin = { version = "0.12.3", default-features = false, features = ["spin_mutex"] }
 x86_64 = { version = "0.15.5", default-features = false, features = ["instructions", "abi_x86_interrupt"] }
