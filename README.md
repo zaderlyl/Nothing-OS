@@ -2,14 +2,18 @@
 
 Un mini noyau "bare metal" x86_64, écrit en Rust, qui boot dans QEMU.
 
-L'idée : un "OS" sans bureau, sans applications, sans menu. L'écran
-d'accueil est un fond noir avec le nom de l'OS, le personnage **Asti**,
-et sa **barre de nourriture**. C'est tout — pour le moment.
+L'idée : un "OS" sans bureau, sans applications, sans menu. Fond noir,
+le personnage **Asti** calé en haut à droite (et qui ne bouge pas), avec
+son **panneau de nourriture** vertical juste à côté. C'est tout — pour
+le moment.
+
+Asti est un portage direct du moteur de rendu de l'appli « PC Pet » : une
+matrice de LED circulaire qui cligne des yeux et regarde autour d'elle.
 
 Côté technique, c'est l'alternative "raisonnable" à un vrai OS complet :
 pas de pilotes matériels réels, pas de multi-tâche, juste assez de
-plomberie bas niveau (bootloader multiboot, passage en mode 64-bit, GDT,
-IDT, écran texte VGA) pour avoir un vrai noyau qui démarre, avec une base
+plomberie bas niveau (boot PVH/multiboot, mode 64-bit, GDT, IDT, mode
+graphique VGA 13h) pour avoir un vrai noyau qui démarre, avec une base
 saine pour ajouter des trucs petit à petit.
 
 ![Capture d'écran de l'accueil](docs/screenshot.png)
@@ -32,11 +36,12 @@ saine pour ajouter des trucs petit à petit.
 3. `boot/long_mode.asm` (64-bit) reprend la main juste après le saut en
    mode long : il active SSE (nécessaire pour le code Rust) puis appelle
    `rust_main`.
-4. `src/lib.rs` (Rust, `#![no_std]`) prend le relais : il installe la GDT
-   (`src/gdt.rs`) et l'IDT (`src/interrupts.rs`), puis appelle
-   `home::render()` (`src/home.rs`) qui dessine l'écran d'accueil dans le
-   buffer texte VGA (`0xb8000`), et boucle en `hlt`. Les traces de boot
-   partent sur le port série pour ne pas encombrer l'écran.
+4. `src/lib.rs` (Rust, `#![no_std]`) prend le relais : GDT (`src/gdt.rs`),
+   IDT (`src/interrupts.rs`), calibration du TSC (`src/time.rs`), passage
+   en mode graphique VGA 13h (`src/fb.rs`), puis `home::run()`
+   (`src/home.rs`) : boucle de rendu ~30 img/s qui dessine Asti
+   (`src/asti.rs`) et son panneau de nourriture. Les traces de boot
+   partent sur le port série.
 
 ## Une bidouille assumée : pas de cible bare-metal "propre"
 
@@ -152,8 +157,8 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
 
 ## État actuel
 
-- ✅ Boot (PVH `qemu -kernel` **ou** GRUB/Multiboot) -> long mode -> Rust,
-  écran texte VGA. Testé sur Mac Apple Silicon (`make run`).
+- ✅ Boot (PVH `qemu -kernel` **ou** GRUB/Multiboot) -> long mode -> Rust.
+  Testé sur Mac Apple Silicon (`make run`).
 - ✅ GDT + TSS (`src/gdt.rs`) : GDT 64-bit minimale + TSS avec une entrée
   dans l'IST, pour donner au gestionnaire de double fault sa propre pile.
   Sans ça, un débordement de la pile noyau ne pourrait pas être servi et
@@ -166,28 +171,30 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
   instances globales uniques, protégées par un mutex (`spin::Mutex`) —
   nécessaire dès qu'un gestionnaire d'interruption peut vouloir écrire à
   l'écran en même temps que le code "normal".
-- ✅ Écran d'accueil (`src/home.rs`) : fond noir, nom de l'OS, personnage
-  **Asti**, et **barre de nourriture** (`Nourriture [██░░] 62%`, couleur
-  verte/jaune/rouge selon le niveau). Dessiné une fois au boot.
-  - Asti est rendu comme dans l'appli d'origine « PC Pet » : une matrice
-    de LED circulaire 25×25. Le tracé se fait dans un buffer de luminance
-    `f32` (primitives `disc` / `stroke` portées telles quelles depuis le
-    moteur de PC Pet, géométrie du visage identique), puis chaque point
-    devient une cellule texte VGA (`■`, 0xFE) — points ternes pour le
-    disque, points blancs pour les yeux et le sourire.
-  - `src/vga.rs` : `put_cell()` (écriture d'une cellule brute) et
-    `disable_blink()` (le bit 7 de l'attribut redevient "fond haute
-    intensité", nécessaire pour les fonds clairs).
-  - Le niveau de nourriture est un `AtomicU8` (`FOOD`) avec l'API
-    `food()` / `set_food()` / `feed()` / `starve()` prête pour la suite.
+- ✅ Mode graphique VGA 13h (`src/fb.rs`) : 320×200, 256 couleurs,
+  framebuffer 0xA0000, registres programmés à la main (pas de BIOS).
+  Double-buffer + palette par teinte.
+- ✅ Base de temps (`src/time.rs`) : calibration du TSC contre le canal 2
+  du PIT (sans interruptions), pour un `now_secs()` flottant.
+- ✅ **Asti** (`src/asti.rs`) : portage direct du moteur de PC Pet
+  (`renderer/engine.js` + `pet.js`). Buffer de luminance `f32` 25×25,
+  primitives `disc` / `hole` / `stroke` identiques, `drawCreature` (mode
+  visage : yeux + sourire), `renderToScreen` (boîtier, points éteints,
+  9 niveaux de luminosité, halo), table `TINTS`. `Brain` planifie les
+  micro-animations au repos (`blink`, regards) comme dans `pet.js`.
+  Calé en haut à droite, immobile.
+- ✅ Panneau de nourriture (`src/home.rs`) : jauge verticale à gauche
+  d'Asti, se vide du haut vers le bas, couleur selon le niveau. Niveau =
+  `AtomicU8` avec l'API `food()` / `set_food()` / `feed()` / `starve()`.
 
 ## Prochaines étapes possibles
 
 - **Timer (PIT, IRQ0)** : faire baisser la nourriture d'Asti avec le
-  temps et re-`render()` l'accueil à chaque tick — c'est ce qui rendra
-  Asti "vivant".
+  temps — c'est ce qui le rendra vraiment "vivant".
 - **Pilote clavier PS/2 (IRQ1)** : une touche pour nourrir Asti
   (`home::feed(...)`), première vraie interaction.
+- Porter plus de poses/teintes de PC Pet (bâillement, sommeil la "nuit",
+  réactions).
 - Un allocateur mémoire (`#[global_allocator]`) pour débloquer `alloc`
   (`Vec`, `String`, etc.).
 - Un ordonnanceur minimal (coopératif d'abord) pour faire tourner

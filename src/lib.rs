@@ -15,10 +15,14 @@
 #![no_std]
 #![feature(abi_x86_interrupt)]
 
+mod asti;
+mod fb;
 mod gdt;
 mod home;
 mod interrupts;
+mod port;
 mod serial;
+mod time;
 mod vga;
 
 use core::panic::PanicInfo;
@@ -76,34 +80,6 @@ pub fn clear_screen() {
     });
 }
 
-/// Déplace le curseur texte à une position absolue (ligne, colonne).
-pub fn set_position(row: usize, col: usize) {
-    x86_64::instructions::interrupts::without_interrupts(|| {
-        WRITER.lock().set_position(row, col);
-    });
-}
-
-/// Écrit `count` fois l'octet `byte` tel quel, sans filtrage ASCII.
-/// Sert aux caractères "graphiques" de la code page 437 du BIOS
-/// (0xB0 ░, 0xB1 ▒, 0xB2 ▓, 0xDB █ ...) pour dessiner des barres, etc.
-pub fn put_raw(byte: u8, count: usize) {
-    x86_64::instructions::interrupts::without_interrupts(|| {
-        let mut writer = WRITER.lock();
-        for _ in 0..count {
-            writer.write_byte(byte);
-        }
-    });
-}
-
-/// Écrit une cellule brute (caractère + couleurs avant/arrière) à une
-/// position absolue, sans bouger le curseur. Utilisé par `home` pour le
-/// rendu d'Asti en demi-blocs.
-pub fn put_cell(row: usize, col: usize, ch: u8, fg: vga::Color, bg: vga::Color) {
-    x86_64::instructions::interrupts::without_interrupts(|| {
-        WRITER.lock().put_cell(row, col, ch, fg, bg);
-    });
-}
-
 /// Écrit à l'écran (buffer texte VGA), comme `print!` en std.
 #[macro_export]
 macro_rules! print {
@@ -153,14 +129,18 @@ pub extern "C" fn rust_main() -> ! {
     // gestionnaire, ça planterait ; ici le handler ne fait que logguer
     // sur le port série, puis on reprend.
     x86_64::instructions::interrupts::int3();
-    serial_println!("[nothing-os] IDT ok, affichage de l'ecran d'accueil");
+    serial_println!("[nothing-os] IDT ok");
 
-    vga::disable_blink();
-    home::render();
+    time::init();
 
-    serial_println!("[nothing-os] accueil affiche, mise en boucle hlt");
+    fb::set_mode13();
+    asti::install_palette(asti::Tint::Null);
+    home::install_palette();
 
-    halt_loop();
+    serial_println!("[nothing-os] mode 13h + palette : boucle de rendu d'Asti");
+
+    let brain = asti::Brain::new(time::seed());
+    home::run(brain);
 }
 
 fn halt_loop() -> ! {
