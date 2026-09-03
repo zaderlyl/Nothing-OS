@@ -49,6 +49,14 @@ QEMU_FLAGS := -no-reboot -no-shutdown
 # disque dur par le noyau (canal IDE primaire).
 QEMU_DISK  := -drive file=$(DISK),format=raw,if=ide,index=0
 
+# partage de dossier : ~/Documents du Mac exposé au noyau via virtio-9p
+# (protocole 9P2000.L). `disable-modern=on` → transport virtio "legacy"
+# (0.9.5), le seul que src/virtio.rs implémente. `security_model=none`
+# fait tourner l'accès fichiers sous l'utilisateur courant.
+SHARE      ?= $(HOME)/Documents
+QEMU_9P    := -fsdev local,id=fsdev0,path=$(SHARE),security_model=none \
+              -device virtio-9p-pci,fsdev=fsdev0,mount_tag=hostdocs,disable-modern=on
+
 .PHONY: all kernel iso run run-fs run-headless run-iso clean
 
 all: $(KERNEL_BIN)
@@ -90,13 +98,13 @@ $(KERNEL_MB): kernel $(BUILD_DIR)/boot-mb.o $(BUILD_DIR)/long_mode.o $(LINKER)
 # relâche (macOS). En fenêtré c'est plus simple à gérer qu'en plein
 # écran, d'où le défaut ci-dessous ; `make run-fs` pour le plein écran.
 run: $(KERNEL_BIN) $(DISK)
-	$(QEMU) -kernel $(KERNEL_BIN) -vga std $(QEMU_DISK) -serial stdio $(QEMU_FLAGS)
+	$(QEMU) -kernel $(KERNEL_BIN) -vga std $(QEMU_DISK) $(QEMU_9P) -serial stdio $(QEMU_FLAGS)
 
 run-fs: $(KERNEL_BIN) $(DISK)
-	$(QEMU) -kernel $(KERNEL_BIN) -vga std -full-screen $(QEMU_DISK) -serial stdio $(QEMU_FLAGS)
+	$(QEMU) -kernel $(KERNEL_BIN) -vga std -full-screen $(QEMU_DISK) $(QEMU_9P) -serial stdio $(QEMU_FLAGS)
 
 run-headless: $(KERNEL_BIN)
-	$(QEMU) -kernel $(KERNEL_BIN) -display none -serial stdio $(QEMU_FLAGS)
+	$(QEMU) -kernel $(KERNEL_BIN) -display none $(QEMU_9P) -serial stdio $(QEMU_FLAGS)
 
 # --- Voie GRUB / ISO (Linux) -----------------------------------------
 $(ISO): $(KERNEL_MB)

@@ -30,6 +30,8 @@ mod home;
 mod interrupts;
 mod kbd;
 mod mouse;
+mod p9;
+mod pci;
 mod port;
 mod rtc;
 mod serial;
@@ -37,6 +39,7 @@ mod shelf;
 mod term;
 mod time;
 mod vga;
+mod virtio;
 mod win;
 
 use core::panic::PanicInfo;
@@ -148,6 +151,14 @@ pub extern "C" fn rust_main() -> ! {
     time::init();
 
     heap::init(); // allocateur : débloque Vec / String / Box
+
+    // Partage de dossier avec le Mac (QEMU virtio-9p). Optionnel : si le
+    // périphérique n'est pas là, on continue sans.
+    if virtio::init_9p() {
+        p9::init();
+        p9::selftest();
+    }
+
     font::capture(); // encore en mode texte : on récupère la police du BIOS
     fs::init();
     fs::load(); // remplace les fichiers par défaut si le disque a une image
@@ -235,6 +246,24 @@ pub unsafe extern "C" fn bcmp(s1: *const u8, s2: *const u8, n: usize) -> i32 {
 // fonction n'est jamais réellement appelée puisqu'on n'unwind jamais.
 #[no_mangle]
 pub extern "C" fn rust_eh_personality() {}
+
+// `alloc` précompilé (String/Vec/…) contient des chemins de code qui
+// référencent ces symboles "libc/unwind". On compile en `panic = "abort"`
+// et on n'unwind jamais : `_Unwind_Resume` ne doit donc jamais être
+// appelé — mais la référence statique doit exister pour lier.
+#[no_mangle]
+pub extern "C" fn _Unwind_Resume() -> ! {
+    halt_loop()
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn strlen(s: *const u8) -> usize {
+    let mut n = 0;
+    while *s.add(n) != 0 {
+        n += 1;
+    }
+    n
+}
 
 #[no_mangle]
 pub unsafe extern "C" fn memmove(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
