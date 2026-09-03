@@ -1,13 +1,22 @@
-# toy-os
+# Nothing OS
 
 Un mini noyau "bare metal" x86_64, écrit en Rust, qui boot dans QEMU.
-C'est l'alternative "raisonnable" à un vrai OS complet : pas de pilotes
-matériels réels, pas de multi-tâche, juste assez de plomberie bas niveau
-(bootloader multiboot, passage en mode 64-bit, écran texte VGA) pour
-avoir un vrai noyau qui démarre et affiche quelque chose, avec une base
+
+L'idée : un "OS" sans bureau, sans applications, sans menu. L'écran
+d'accueil est un fond noir avec le nom de l'OS, le personnage **Asti**,
+et sa **barre de nourriture**. C'est tout — pour le moment.
+
+Côté technique, c'est l'alternative "raisonnable" à un vrai OS complet :
+pas de pilotes matériels réels, pas de multi-tâche, juste assez de
+plomberie bas niveau (bootloader multiboot, passage en mode 64-bit, GDT,
+IDT, écran texte VGA) pour avoir un vrai noyau qui démarre, avec une base
 saine pour ajouter des trucs petit à petit.
 
 ![Capture d'écran du boot](docs/screenshot.png)
+
+> ⚠️ La capture ci-dessus montre encore l'ancien écran de boot ; l'écran
+> d'accueil "Asti" n'a pas encore été re-photographié (pas de QEMU sur la
+> machine de dev actuelle).
 
 ## Comment ça boot
 
@@ -20,9 +29,11 @@ saine pour ajouter des trucs petit à petit.
 3. `boot/long_mode.asm` (64-bit) reprend la main juste après le saut en
    mode long : il active SSE (nécessaire pour le code Rust) puis appelle
    `rust_main`.
-4. `src/lib.rs` (Rust, `#![no_std]`) prend le relais : il écrit dans le
-   buffer texte VGA (`0xb8000`) pour afficher le message de bienvenue,
-   et boucle en `hlt`.
+4. `src/lib.rs` (Rust, `#![no_std]`) prend le relais : il installe la GDT
+   (`src/gdt.rs`) et l'IDT (`src/interrupts.rs`), puis appelle
+   `home::render()` (`src/home.rs`) qui dessine l'écran d'accueil dans le
+   buffer texte VGA (`0xb8000`), et boucle en `hlt`. Les traces de boot
+   partent sur le port série pour ne pas encombrer l'écran.
 
 ## Une bidouille assumée : pas de cible bare-metal "propre"
 
@@ -63,7 +74,7 @@ jour l'accès à `static.rust-lang.org` est possible (par exemple en
 lançant ce projet sur ta machine plutôt qu'en environnement cloud
 restreint), la vraie suite logique est de repasser sur une cible
 bare-metal avec `rustup toolchain install nightly`, `rustup component
-add rust-src`, une target JSON custom (`x86_64-toy_os.json`) et
+add rust-src`, une target JSON custom (`x86_64-nothing_os.json`) et
 `cargo build -Z build-std=core,alloc`. C'est plus propre et ça enlève
 tout le bricolage `memcpy`/`eh_personality`.
 
@@ -78,7 +89,7 @@ sudo apt install nasm qemu-system-x86 grub-pc-bin grub-common xorriso mtools
 ```
 
 ```bash
-make            # build kernel.bin + toy-os.iso
+make            # build kernel.bin + nothing-os.iso
 make run        # build puis lance dans QEMU avec un écran
 make run-headless   # pareil mais sans fenêtre, sortie sur le port série
 ```
@@ -122,10 +133,19 @@ Mac :
   instances globales uniques, protégées par un mutex (`spin::Mutex`) —
   nécessaire dès qu'un gestionnaire d'interruption peut vouloir écrire à
   l'écran en même temps que le code "normal".
+- ✅ Écran d'accueil (`src/home.rs`) : fond noir, nom de l'OS, personnage
+  **Asti** en art ASCII, et **barre de nourriture** (`Nourriture [██░░] 62%`,
+  couleur verte/jaune/rouge selon le niveau). Dessiné une fois au boot.
+  Le niveau de nourriture est un `AtomicU8` (`FOOD`) avec l'API
+  `food()` / `set_food()` / `feed()` / `starve()` prête pour la suite.
 
 ## Prochaines étapes possibles
 
-- Pilote clavier PS/2 (IRQ1) pour avoir une vraie boucle d'interaction.
+- **Timer (PIT, IRQ0)** : faire baisser la nourriture d'Asti avec le
+  temps et re-`render()` l'accueil à chaque tick — c'est ce qui rendra
+  Asti "vivant".
+- **Pilote clavier PS/2 (IRQ1)** : une touche pour nourrir Asti
+  (`home::feed(...)`), première vraie interaction.
 - Un allocateur mémoire (`#[global_allocator]`) pour débloquer `alloc`
   (`Vec`, `String`, etc.).
 - Un ordonnanceur minimal (coopératif d'abord) pour faire tourner

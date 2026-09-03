@@ -1,4 +1,4 @@
-//! toy-os — un mini noyau "bare metal" x86_64 écrit en Rust.
+//! Nothing OS — un mini noyau "bare metal" x86_64 écrit en Rust.
 //!
 //! Ce crate est compilé en `staticlib` puis lié à la main avec un petit
 //! bootstrap assembleur (voir boot/) qui s'occupe du multiboot, du
@@ -16,6 +16,7 @@
 #![feature(abi_x86_interrupt)]
 
 mod gdt;
+mod home;
 mod interrupts;
 mod serial;
 mod vga;
@@ -75,6 +76,25 @@ pub fn clear_screen() {
     });
 }
 
+/// Déplace le curseur texte à une position absolue (ligne, colonne).
+pub fn set_position(row: usize, col: usize) {
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        WRITER.lock().set_position(row, col);
+    });
+}
+
+/// Écrit `count` fois l'octet `byte` tel quel, sans filtrage ASCII.
+/// Sert aux caractères "graphiques" de la code page 437 du BIOS
+/// (0xB0 ░, 0xB1 ▒, 0xB2 ▓, 0xDB █ ...) pour dessiner des barres, etc.
+pub fn put_raw(byte: u8, count: usize) {
+    x86_64::instructions::interrupts::without_interrupts(|| {
+        let mut writer = WRITER.lock();
+        for _ in 0..count {
+            writer.write_byte(byte);
+        }
+    });
+}
+
 /// Écrit à l'écran (buffer texte VGA), comme `print!` en std.
 #[macro_export]
 macro_rules! print {
@@ -105,42 +125,30 @@ macro_rules! serial_println {
 /// pagination et SSE activés.
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
-    serial_println!("[toy-os] rust_main() a demarre");
+    serial_println!("[nothing-os] rust_main() a demarre");
 
     gdt::init();
     interrupts::init();
 
-    clear_screen();
+    // Traces de boot : sur le port série uniquement, l'écran est réservé
+    // à l'accueil (fond noir, Asti, barre de nourriture).
+    serial_println!("[nothing-os] boot OK :");
+    serial_println!("  - multiboot verifie");
+    serial_println!("  - long mode (64-bit) actif");
+    serial_println!("  - pagination (identity map 1 GiB) active");
+    serial_println!("  - SSE active");
+    serial_println!("  - GDT + TSS (pile dediee double fault)");
+    serial_println!("  - IDT chargee (breakpoint, double fault)");
 
-    set_color(vga::Color::Yellow, vga::Color::Black);
-    println!("==========================================");
-    println!("   toy-os -- mini noyau Rust bare metal");
-    println!("==========================================");
-
-    set_color(vga::Color::LightGreen, vga::Color::Black);
-    println!();
-    println!("Boot OK :");
-    println!("  - multiboot verifie");
-    println!("  - long mode (64-bit) actif");
-    println!("  - pagination (identity map 1 GiB) active");
-    println!("  - SSE active");
-    println!("  - GDT + TSS (pile dediee double fault)");
-    println!("  - IDT chargee (breakpoint, double fault)");
-
-    // Déclenche volontairement une interruption "breakpoint" (int3) pour
-    // prouver que l'IDT fonctionne : sans gestionnaire, ça plante tout ;
-    // avec, on voit le message ci-dessous et le noyau continue.
+    // Auto-test de l'IDT : on déclenche un breakpoint (int3). Sans
+    // gestionnaire, ça planterait ; ici le handler ne fait que logguer
+    // sur le port série, puis on reprend.
     x86_64::instructions::interrupts::int3();
+    serial_println!("[nothing-os] IDT ok, affichage de l'ecran d'accueil");
 
-    set_color(vga::Color::LightGreen, vga::Color::Black);
-    println!("On est revenus apres l'interruption : tout va bien !");
+    home::render();
 
-    set_color(vga::Color::LightCyan, vga::Color::Black);
-    println!();
-    println!("Prochaines etapes possibles : clavier PS/2,");
-    println!("allocateur memoire, scheduler...");
-
-    serial_println!("[toy-os] affichage VGA termine, mise en boucle hlt");
+    serial_println!("[nothing-os] accueil affiche, mise en boucle hlt");
 
     halt_loop();
 }
@@ -155,7 +163,7 @@ fn halt_loop() -> ! {
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    serial_println!("[toy-os] PANIC: {}", info);
+    serial_println!("[nothing-os] PANIC: {}", info);
 
     set_color(vga::Color::White, vga::Color::Red);
     clear_screen();

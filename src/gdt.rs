@@ -82,7 +82,7 @@ pub fn init() -> Selectors {
             CS::set_reg(code_selector);
             load_tss(tss_selector);
 
-            crate::serial_println!("[toy-os] GDT + TSS charges (IST pour double fault)");
+            crate::serial_println!("[nothing-os] GDT + TSS charges (IST pour double fault)");
 
             Selectors {
                 code_selector,

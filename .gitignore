@@ -3,7 +3,7 @@
 .DS_Store
 /isodir
 /kernel.bin
-/toy-os.iso
+/nothing-os.iso
 *.log
 *.ppm
 /*.png

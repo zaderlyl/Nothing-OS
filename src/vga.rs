@@ -103,6 +103,13 @@ impl Writer {
         self.color_code = ColorCode::new(foreground, background);
     }
 
+    /// Place le curseur à une position absolue (ligne, colonne).
+    /// Les valeurs hors écran sont ramenées au bord.
+    pub fn set_position(&mut self, row: usize, col: usize) {
+        self.row_position = row.min(BUFFER_HEIGHT - 1);
+        self.column_position = col.min(BUFFER_WIDTH - 1);
+    }
+
     fn new_line(&mut self) {
         if self.row_position + 1 < BUFFER_HEIGHT {
             self.row_position += 1;

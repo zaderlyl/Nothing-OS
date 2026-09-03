@@ -14,6 +14,9 @@ use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame};
 use crate::gdt;
 use crate::{clear_screen, println, serial_println, set_color, vga};
 
+// Le handler `breakpoint` n'écrit QUE sur le port série : l'écran est
+// réservé à l'accueil, on ne veut pas qu'un int3 vienne le griffonner.
+
 static mut IDT: InterruptDescriptorTable = InterruptDescriptorTable::new();
 
 pub fn init() {
@@ -33,21 +36,18 @@ pub fn init() {
         }
     }
 
-    serial_println!("[toy-os] IDT chargee (breakpoint, double fault)");
+    serial_println!("[nothing-os] IDT chargee (breakpoint, double fault)");
 }
 
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
-    serial_println!("[toy-os] EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
-
-    set_color(vga::Color::Yellow, vga::Color::Black);
-    println!("[interruption] breakpoint (int3) recue et geree, on continue.");
+    serial_println!("[nothing-os] EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
 }
 
 extern "x86-interrupt" fn double_fault_handler(
     stack_frame: InterruptStackFrame,
     _error_code: u64,
 ) -> ! {
-    serial_println!("[toy-os] EXCEPTION: DOUBLE FAULT\n{:#?}", stack_frame);
+    serial_println!("[nothing-os] EXCEPTION: DOUBLE FAULT\n{:#?}", stack_frame);
 
     set_color(vga::Color::White, vga::Color::Red);
     clear_screen();

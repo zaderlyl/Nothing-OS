@@ -1,7 +1,7 @@
-# Makefile — toy-os
+# Makefile — Nothing OS
 #
 # Cibles utiles :
-#   make            construit kernel.bin + toy-os.iso
+#   make            construit kernel.bin + nothing-os.iso
 #   make run        construit puis lance dans QEMU avec un écran (VGA)
 #   make run-headless  pareil mais sans affichage, sortie sur le port série
 #   make clean      supprime les fichiers générés
@@ -13,7 +13,7 @@ CARGO      := cargo
 BOOT_DIR   := boot
 BUILD_DIR  := build
 KERNEL_BIN := kernel.bin
-ISO        := toy-os.iso
+ISO        := nothing-os.iso
 
 .PHONY: all iso run run-headless clean kernel
 
