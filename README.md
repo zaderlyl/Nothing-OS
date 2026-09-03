@@ -2,23 +2,26 @@
 
 Un mini noyau "bare metal" x86_64, écrit en Rust, qui boot dans QEMU.
 
-L'idée : un "OS" sans bureau, sans applications, sans menu. Fond noir,
-le personnage **Asti** calé en haut à droite (et qui ne bouge pas), avec
-son **panneau de nourriture** vertical juste à côté. C'est tout — pour
-le moment.
+L'idée : un "OS" minimaliste. Un bureau plein écran (barre de titre,
+fond, curseur souris) et c'est tout... sauf **Asti**, le compagnon, qui
+vit caché contre le bord droit. Quand la souris s'en approche, il
+coulisse pour apparaître et son **étagère de friandises** se déplie ;
+un clic sur une friandise le nourrit, puis il se retire quand la souris
+repart.
 
 Asti est un portage direct du moteur de rendu de l'appli « PC Pet » : une
-matrice de LED circulaire qui cligne des yeux et regarde autour d'elle.
+matrice de LED circulaire qui cligne des yeux, regarde autour d'elle, et
+mâche quand on la nourrit.
+
+![Asti dans le bureau](docs/desktop.gif)
 
 Côté technique, c'est l'alternative "raisonnable" à un vrai OS complet :
 pas de pilotes matériels réels, pas de multi-tâche, juste assez de
 plomberie bas niveau (boot PVH/multiboot, mode 64-bit, GDT, IDT, mode
-graphique VGA 13h) pour avoir un vrai noyau qui démarre, avec une base
-saine pour ajouter des trucs petit à petit.
+graphique VGA 13h, souris PS/2) pour avoir un vrai noyau qui démarre,
+avec une base saine pour ajouter des trucs petit à petit.
 
-![Capture d'écran de l'accueil](docs/screenshot.png)
-
-*(Capture réelle : `make run` sur un Mac Apple Silicon, QEMU via boot PVH.)*
+*(Captures réelles : `make run` sur un Mac Apple Silicon, QEMU via boot PVH.)*
 
 ## Comment ça boot
 
@@ -177,18 +180,25 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
 - ✅ **Asti** (`src/asti.rs`) : portage direct du moteur de PC Pet
   (`renderer/engine.js` + `pet.js`). Buffer de luminance `f32` 25×25,
   primitives `disc` / `hole` / `stroke` identiques, `drawCreature` (mode
-  visage : yeux + sourire), `renderToScreen` (boîtier, points éteints,
-  9 niveaux de luminosité, halo), table `TINTS`. `Brain` planifie les
+  visage : yeux + sourire + pose « il mange »), `renderToScreen` (boîtier,
+  points éteints, 9 niveaux + halo), table `TINTS`. `Brain` planifie les
   micro-animations au repos (`blink`, regards) comme dans `pet.js`.
-  Calé en haut à droite, immobile.
-- ✅ Panneau de nourriture (`src/home.rs`) : jauge verticale à gauche
-  d'Asti, se vide du haut vers le bas, couleur selon le niveau. Niveau =
-  `AtomicU8` avec l'API `food()` / `set_food()` / `feed()` / `starve()`.
+- ✅ Souris PS/2 (`src/mouse.rs`) : en polling, curseur flèche.
+- ✅ Police (`src/font.rs`) : récupérée du plan 2 de la VRAM (celle du
+  BIOS) puis redessinée pixel par pixel.
+- ✅ Bureau (`src/home.rs`) : fond + barre de titre, curseur. Asti caché
+  contre le bord droit ; il coulisse quand la souris s'approche (avec un
+  sursis de 0,5 s), se retire sinon.
+- ✅ Étagère de friandises (`src/shelf.rs`) : 9 friandises dessinées en
+  points (motifs de `treats.html`), apparaît avec Asti. Clic → `feed()`
+  (+ pose « nom ») ; la friandise revient ~2,6 s plus tard.
 
 ## Prochaines étapes possibles
 
 - **Timer (PIT, IRQ0)** : faire baisser la nourriture d'Asti avec le
-  temps — c'est ce qui le rendra vraiment "vivant".
+  temps — c'est ce qui le rendra vraiment "vivant". (Il manque aussi une
+  jauge visible du niveau de faim.)
+- Passer la souris (et le timer) en **interruptions** au lieu du polling.
 - **Pilote clavier PS/2 (IRQ1)** : une touche pour nourrir Asti
   (`home::feed(...)`), première vraie interaction.
 - Porter plus de poses/teintes de PC Pet (bâillement, sommeil la "nuit",

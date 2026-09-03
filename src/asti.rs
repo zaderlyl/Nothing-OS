@@ -149,12 +149,14 @@ impl Canvas {
 enum EyeStyle {
     Dot,
     Calm,
+    Arc,
     Sleep,
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum Mouth {
     Smile,
+    Grin,
     Line,
     O,
     None,
@@ -165,23 +167,25 @@ fn draw_eye(cv: &mut Canvas, x: f32, y: f32, style: EyeStyle, bright: f32, k: f3
     let seg = |cv: &mut Canvas, ax: f32, ay: f32, bx: f32, by: f32, w: f32| {
         cv.stroke(x + ax * k, y + ay * k, x + bx * k, y + by * k, w * k + 0.05, bright);
     };
+    // arc(sign) : sign=-1 → ‿ (doux), sign=+1 → ∩ (rieur)
+    let arc = |cv: &mut Canvas, sign: f32| {
+        let (hw, amp, w) = (1.35_f32, 1.15_f32, 0.4_f32);
+        let mut prev: Option<(f32, f32)> = None;
+        let mut i = -hw;
+        while i <= hw + 1e-4 {
+            let py = sign * amp * ((i / hw) * (i / hw) - 0.5);
+            if let Some((px, ppy)) = prev {
+                seg(cv, px, ppy, i, py, w);
+            }
+            prev = Some((i, py));
+            i += hw / 4.0;
+        }
+    };
     match style {
         EyeStyle::Dot => cv.disc(x, y, 1.05 * k, bright),
         EyeStyle::Sleep => seg(cv, -1.15, 0.0, 1.15, 0.0, 0.42),
-        EyeStyle::Calm => {
-            // arc(sign = -1, hw = 1.35, amp = 1.15, w = 0.4)
-            let (hw, amp, w) = (1.35_f32, 1.15_f32, 0.4_f32);
-            let mut prev: Option<(f32, f32)> = None;
-            let mut i = -hw;
-            while i <= hw + 1e-4 {
-                let py = -1.0 * amp * ((i / hw) * (i / hw) - 0.5);
-                if let Some((px, ppy)) = prev {
-                    seg(cv, px, ppy, i, py, w);
-                }
-                prev = Some((i, py));
-                i += hw / 4.0;
-            }
-        }
+        EyeStyle::Calm => arc(cv, -1.0),
+        EyeStyle::Arc => arc(cv, 1.0),
     }
 }
 
@@ -190,6 +194,19 @@ fn draw_mouth(cv: &mut Canvas, x: f32, y: f32, kind: Mouth, bright: f32, k: f32)
     let seg = |cv: &mut Canvas, ax: f32, ay: f32, bx: f32, by: f32, w: f32| {
         cv.stroke(x + ax * k, y + ay * k, x + bx * k, y + by * k, w * k + 0.05, bright);
     };
+    // curve(halfW, curv, w) : arc de bouche (curv > 0 = sourire)
+    let curve = |cv: &mut Canvas, half: f32, curv: f32, w: f32| {
+        let mut prev: Option<(f32, f32)> = None;
+        let mut i = -half;
+        while i <= half + 1e-4 {
+            let py = -0.15 + curv * (1.0 - (i / half) * (i / half));
+            if let Some((px, ppy)) = prev {
+                seg(cv, px, ppy, i, py, w);
+            }
+            prev = Some((i, py));
+            i += half / 4.0;
+        }
+    };
     match kind {
         Mouth::None => {}
         Mouth::Line => seg(cv, -1.0, 0.0, 1.0, 0.0, 0.4),
@@ -197,20 +214,8 @@ fn draw_mouth(cv: &mut Canvas, x: f32, y: f32, kind: Mouth, bright: f32, k: f32)
             cv.disc(x, y + 0.1 * k, 0.85 * k, bright);
             cv.hole(x, y + 0.1 * k, 0.4 * k);
         }
-        Mouth::Smile => {
-            // curve(halfW = 1.5, curv = 0.75, w = 0.4)
-            let (half, curv, w) = (1.5_f32, 0.75_f32, 0.4_f32);
-            let mut prev: Option<(f32, f32)> = None;
-            let mut i = -half;
-            while i <= half + 1e-4 {
-                let py = -0.15 + curv * (1.0 - (i / half) * (i / half));
-                if let Some((px, ppy)) = prev {
-                    seg(cv, px, ppy, i, py, w);
-                }
-                prev = Some((i, py));
-                i += half / 4.0;
-            }
-        }
+        Mouth::Smile => curve(cv, 1.5, 0.75, 0.4),
+        Mouth::Grin => curve(cv, 1.9, 1.25, 0.45),
     }
 }
 
@@ -234,14 +239,17 @@ pub enum Pose {
     LookR,
     LookU,
     LookD,
+    /// Il mange une friandise (`nom` de engine.js).
+    Eat,
 }
 
-pub fn draw_creature(cv: &mut Canvas, s: &State) {
-    let (cx, cy) = (CENTER, CENTER);
+pub fn draw_creature(cv: &mut Canvas, s: &State, t: f32) {
+    let cx = CENTER;
+    let mut cy = CENTER;
     let mut look_h = 0.0_f32;
     let mut look_v = 0.0_f32;
     let mut eye_style = EyeStyle::Dot;
-    let mouth = Mouth::Smile;
+    let mut mouth = Mouth::Smile;
     let mut bright = 1.0_f32;
 
     // couche 2 : micro-animations
@@ -258,8 +266,16 @@ pub fn draw_creature(cv: &mut Canvas, s: &State) {
             Pose::LookR => look_h = 3.0 * sp,
             Pose::LookU => look_v = -2.2 * sp,
             Pose::LookD => look_v = 2.2 * sp,
-            Pose::Rest => {}
+            _ => {}
         }
+    }
+
+    // couche 3 : réaction "il mange" (nom)
+    if s.layer == 3 && s.pose == Pose::Eat {
+        let chomp = (t * 9.0) % 1.0;
+        eye_style = EyeStyle::Arc;
+        mouth = if chomp < 0.5 { Mouth::O } else { Mouth::Grin };
+        cy -= libm::fabsf(sinf(t * 9.0)) * 0.5;
     }
 
     bright *= 0.6 + 0.4 * s.energy;
@@ -377,24 +393,30 @@ pub fn install_palette(t: Tint) {
 
 /// Taille d'un point de matrice, en pixels écran.
 const CELL: f32 = 5.4;
-/// Origine (coin haut-gauche de la grille) — Asti calé en haut à droite.
-const OX: f32 = (fb::WIDTH as f32) - (N as f32) * CELL - 13.0;
+/// `oy` fixe : Asti est calé en haut.
 const OY: f32 = 6.0;
 
 /// Indice de palette du liseré du boîtier.
 const PAL_RIM: u8 = 3;
 
-/// Centre écran du disque.
-pub fn disc_center() -> (f32, f32) {
-    (OX + CENTER * CELL + CELL * 0.5, OY + CENTER * CELL + CELL * 0.5)
+/// Largeur/hauteur de la grille de points, en pixels.
+pub fn grid_span() -> f32 {
+    N as f32 * CELL
+}
+
+/// Centre écran du disque pour une origine de grille `ox` donnée.
+pub fn disc_center(ox: f32) -> (f32, f32) {
+    (ox + CENTER * CELL + CELL * 0.5, OY + CENTER * CELL + CELL * 0.5)
 }
 
 pub fn disc_radius() -> f32 {
     (R + 0.6) * CELL
 }
 
-pub fn render(cv: &Canvas) {
-    let (dcx, dcy) = disc_center();
+/// Dessine Asti, coin haut-gauche de la grille à `ox` (permet de le
+/// faire coulisser hors de l'écran).
+pub fn render(cv: &Canvas, ox: f32) {
+    let (dcx, dcy) = disc_center(ox);
 
     // Boîtier : disque net + fin liseré + léger relief vertical (haut
     // clair, bas sombre) comme le "boîtier" de PC Pet.
@@ -427,7 +449,7 @@ pub fn render(cv: &Canvas) {
             if hyp(x as f32 - CENTER, y as f32 - CENTER) > R {
                 continue;
             }
-            let (px, py) = (OX + x as f32 * CELL + CELL * 0.5, OY + y as f32 * CELL + CELL * 0.5);
+            let (px, py) = (ox + x as f32 * CELL + CELL * 0.5, OY + y as f32 * CELL + CELL * 0.5);
             fb::fill_circle(px, py, CELL * 0.30, PAL_OFF);
         }
     }
@@ -441,7 +463,7 @@ pub fn render(cv: &Canvas) {
             }
             let q = roundf(v * 8.0) / 8.0;
             let lvl = (q * 8.0) as usize;
-            let (px, py) = (OX + x as f32 * CELL + CELL * 0.5, OY + y as f32 * CELL + CELL * 0.5);
+            let (px, py) = (ox + x as f32 * CELL + CELL * 0.5, OY + y as f32 * CELL + CELL * 0.5);
             fb::fill_circle(px, py, CELL * 0.30 + CELL * 0.34 * q, PAL_GLOW + lvl as u8);
         }
     }
@@ -455,7 +477,7 @@ pub fn render(cv: &Canvas) {
             }
             let q = roundf(v * 8.0) / 8.0;
             let lvl = (q * 8.0) as usize;
-            let (px, py) = (OX + x as f32 * CELL + CELL * 0.5, OY + y as f32 * CELL + CELL * 0.5);
+            let (px, py) = (ox + x as f32 * CELL + CELL * 0.5, OY + y as f32 * CELL + CELL * 0.5);
             fb::fill_circle(px, py, CELL * 0.36, PAL_LIT + lvl as u8);
         }
     }
@@ -493,6 +515,8 @@ pub struct Brain {
     dur: f32,
     next: f32,
     last_t: f32,
+    /// Réaction ponctuelle (ex. « il mange ») active jusqu'à `react_until`.
+    react_until: f32,
 }
 
 impl Brain {
@@ -505,7 +529,14 @@ impl Brain {
             dur: 0.0,
             next: 0.0,
             last_t: 0.0,
+            react_until: 0.0,
         }
+    }
+
+    /// Déclenche la réaction « il mange une friandise » pour ~1,6 s.
+    pub fn react_feed(&mut self, now: f32) {
+        self.react_until = now + 1.6;
+        self.energy = (self.energy + 0.12).min(1.15);
     }
 
     fn schedule(&mut self, now: f32) {
@@ -538,6 +569,16 @@ impl Brain {
         self.last_t = now;
         let k = 1.0 - libm::powf(0.5, dt / 4.0);
         self.energy += (0.8 - self.energy) * k;
+
+        // réaction prioritaire
+        if now < self.react_until {
+            return State {
+                layer: 3,
+                pose: Pose::Eat,
+                phase: 0.0,
+                energy: self.energy,
+            };
+        }
 
         if self.next == 0.0 {
             self.schedule(now);

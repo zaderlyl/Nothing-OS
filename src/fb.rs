@@ -99,13 +99,6 @@ pub fn present() {
     }
 }
 
-/// Remplit tout le back-buffer avec une couleur.
-pub fn clear(color: u8) {
-    unsafe {
-        core::ptr::write_bytes(back(), color, WIDTH * HEIGHT);
-    }
-}
-
 #[inline(always)]
 pub fn put(x: i32, y: i32, color: u8) {
     if x < 0 || y < 0 || x >= WIDTH as i32 || y >= HEIGHT as i32 {

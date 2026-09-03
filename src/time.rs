@@ -40,14 +40,6 @@ pub fn now_secs() -> f32 {
     dt as f32 / hz as f32
 }
 
-/// Attend (spin) jusqu'à ce que `secs` se soient écoulés depuis `from`
-/// (une valeur de `now_secs()`). Sert à cadencer la boucle de rendu.
-pub fn spin_until(from: f32, secs: f32) {
-    while now_secs() - from < secs {
-        core::hint::spin_loop();
-    }
-}
-
 fn calibrate() -> u64 {
     // ~50 ms mesurés sur le canal 2 du PIT.
     const MS: u64 = 50;
