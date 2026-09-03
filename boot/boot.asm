@@ -125,7 +125,10 @@ check_long_mode:
     mov al, "2"
     jmp error
 
-; identity-map le premier GiB de RAM avec des pages de 2 MiB (P4 -> P3 -> P2)
+; identity-map avec des pages de 2 MiB :
+;   - le 1er GiB  (0x00000000..) : P3[0] -> p2_table
+;   - le 4e  GiB  (0xC0000000..) : P3[3] -> p2_table_hi
+;     (là où QEMU place le framebuffer linéaire de la carte VGA std)
 set_up_page_tables:
     mov eax, p3_table
     or eax, 0b11 ; present + writable
@@ -134,6 +137,10 @@ set_up_page_tables:
     mov eax, p2_table
     or eax, 0b11
     mov [p3_table], eax
+
+    mov eax, p2_table_hi
+    or eax, 0b11
+    mov [p3_table + 3 * 8], eax
 
     mov ecx, 0
 .map_p2_table:
@@ -145,6 +152,18 @@ set_up_page_tables:
     inc ecx
     cmp ecx, 512
     jne .map_p2_table
+
+    mov ecx, 0
+.map_p2_hi:
+    mov eax, 0x200000
+    mul ecx
+    add eax, 0xC0000000
+    or eax, 0b10000011
+    mov [p2_table_hi + ecx * 8], eax
+
+    inc ecx
+    cmp ecx, 512
+    jne .map_p2_hi
 
     ret
 
@@ -194,6 +213,8 @@ p4_table:
 p3_table:
     resb 4096
 p2_table:
+    resb 4096
+p2_table_hi:
     resb 4096
 stack_bottom:
     resb 4096 * 16

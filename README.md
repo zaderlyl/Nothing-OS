@@ -17,8 +17,8 @@ mâche quand on la nourrit.
 
 Côté technique, c'est l'alternative "raisonnable" à un vrai OS complet :
 pas de pilotes matériels réels, pas de multi-tâche, juste assez de
-plomberie bas niveau (boot PVH/multiboot, mode 64-bit, GDT, IDT, mode
-graphique VGA 13h, souris PS/2) pour avoir un vrai noyau qui démarre,
+plomberie bas niveau (boot PVH/multiboot, mode 64-bit, GDT, IDT,
+framebuffer 640×480, souris PS/2) pour avoir un vrai noyau qui démarre,
 avec une base saine pour ajouter des trucs petit à petit.
 
 *(Captures réelles : `make run` sur un Mac Apple Silicon, QEMU via boot PVH.)*
@@ -34,17 +34,18 @@ avec une base saine pour ajouter des trucs petit à petit.
      ré-assemblé avec `-d MULTIBOOT` pour émettre l'en-tête *Multiboot 1*,
      et l'entrée est `start` (qui vérifie le magic `0x2BADB002`).
 2. `boot/boot.asm` (32-bit) vérifie que le CPU supporte CPUID et le mode
-   long (64-bit), met en place des tables de pages pour identity-mapper
-   le premier Gio de RAM, puis active la pagination.
+   long (64-bit), met en place des tables de pages (identity-map du 1ᵉʳ
+   et du 4ᵉ GiB — ce dernier pour le framebuffer PCI), puis active la
+   pagination.
 3. `boot/long_mode.asm` (64-bit) reprend la main juste après le saut en
    mode long : il active SSE (nécessaire pour le code Rust) puis appelle
    `rust_main`.
 4. `src/lib.rs` (Rust, `#![no_std]`) prend le relais : GDT (`src/gdt.rs`),
    IDT (`src/interrupts.rs`), calibration du TSC (`src/time.rs`), passage
-   en mode graphique VGA 13h (`src/fb.rs`), puis `home::run()`
-   (`src/home.rs`) : boucle de rendu ~30 img/s qui dessine Asti
-   (`src/asti.rs`) et son panneau de nourriture. Les traces de boot
-   partent sur le port série.
+   en mode graphique 640×480 (`src/fb.rs`), init souris (`src/mouse.rs`),
+   puis `home::run()` (`src/home.rs`) : boucle de rendu ~30 img/s
+   (bureau + Asti + étagère de friandises). Les traces de boot partent
+   sur le port série.
 
 ## Une bidouille assumée : pas de cible bare-metal "propre"
 
@@ -172,9 +173,11 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
   instances globales uniques, protégées par un mutex (`spin::Mutex`) —
   nécessaire dès qu'un gestionnaire d'interruption peut vouloir écrire à
   l'écran en même temps que le code "normal".
-- ✅ Mode graphique VGA 13h (`src/fb.rs`) : 320×200, 256 couleurs,
-  framebuffer 0xA0000, registres programmés à la main (pas de BIOS).
-  Double-buffer + palette par teinte.
+- ✅ Mode graphique (`src/fb.rs`) : **640×480**, 256 couleurs (palette
+  DAC), via l'interface Bochs VBE de QEMU. L'adresse du framebuffer
+  linéaire est lue dans le BAR0 PCI de la carte VGA ; `boot.asm`
+  identity-mappe aussi le 4ᵉ GiB (0xC0000000..) pour l'atteindre.
+  Double-buffer.
 - ✅ Base de temps (`src/time.rs`) : calibration du TSC contre le canal 2
   du PIT (sans interruptions), pour un `now_secs()` flottant.
 - ✅ **Asti** (`src/asti.rs`) : portage direct du moteur de PC Pet
@@ -186,12 +189,13 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
 - ✅ Souris PS/2 (`src/mouse.rs`) : en polling, curseur flèche.
 - ✅ Police (`src/font.rs`) : récupérée du plan 2 de la VRAM (celle du
   BIOS) puis redessinée pixel par pixel.
-- ✅ Bureau (`src/home.rs`) : fond + barre de titre, curseur. Asti caché
-  contre le bord droit ; il coulisse quand la souris s'approche (avec un
-  sursis de 0,5 s), se retire sinon.
+- ✅ Bureau (`src/home.rs`) : plein écran, fond + barre de titre +
+  curseur. Asti est **toujours visible** en haut à droite.
 - ✅ Étagère de friandises (`src/shelf.rs`) : 9 friandises dessinées en
-  points (motifs de `treats.html`), apparaît avec Asti. Clic → `feed()`
-  (+ pose « nom ») ; la friandise revient ~2,6 s plus tard.
+  points (motifs de `treats.html`). **Cachée** par défaut ; se déplie
+  quand la souris passe sur Asti (ou sur l'étagère), se replie sinon
+  (sursis 0,5 s). Clic sur une friandise → `feed()` + pose « nom » ;
+  la friandise revient ~2,6 s plus tard.
 
 ## Prochaines étapes possibles
 

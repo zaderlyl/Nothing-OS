@@ -1,10 +1,11 @@
 //! Le "bureau" de Nothing OS.
 //!
-//! Fond plein écran, une barre de titre en haut, un curseur souris. Asti
-//! vit caché contre le bord droit : quand la souris s'approche (ou passe
-//! sur lui), il coulisse pour apparaître ; quand elle repart, il se
-//! retire. Quand il est sorti, son étagère de friandises apparaît (voir
-//! [`crate::shelf`]).
+//! Plein écran : un fond, une barre de titre, un curseur souris, et Asti
+//! (cf. [`crate::asti`]) calé en haut à droite — **toujours visible**.
+//! Seule son **étagère de friandises** est cachée : elle se déplie quand
+//! la souris passe sur Asti (ou sur l'étagère), et se replie sinon.
+//!
+//! `run()` tourne la boucle de rendu (~30 img/s, double-buffer).
 
 #![allow(dead_code)]
 
@@ -29,43 +30,32 @@ pub fn starve(amount: u8) {
 }
 
 // --- palette du bureau (indices 6..=15) ---
-const PAL_BG_TOP: u8 = 6;
-const PAL_BG_BOT: u8 = 7;
+const PAL_BG: u8 = 6;
+const PAL_BG_DIM: u8 = 7;
 const PAL_BAR: u8 = 8;
 const PAL_BAR_TEXT: u8 = 9;
 const PAL_CURSOR: u8 = 10;
 const PAL_CURSOR_EDGE: u8 = 11;
 
 pub fn install_palette() {
-    fb::set_palette(PAL_BG_TOP, 32, 38, 54);
-    fb::set_palette(PAL_BG_BOT, 18, 22, 34);
+    fb::set_palette(PAL_BG, 30, 36, 52);
+    fb::set_palette(PAL_BG_DIM, 20, 24, 38);
     fb::set_palette(PAL_BAR, 12, 14, 22);
-    fb::set_palette(PAL_BAR_TEXT, 200, 208, 226);
+    fb::set_palette(PAL_BAR_TEXT, 205, 212, 230);
     fb::set_palette(PAL_CURSOR, 245, 246, 250);
     fb::set_palette(PAL_CURSOR_EDGE, 20, 22, 30);
 }
 
-const BAR_H: i32 = 13;
+const BAR_H: i32 = 15;
+const W: i32 = fb::WIDTH as i32;
+const H: i32 = fb::HEIGHT as i32;
 
 fn draw_desktop() {
-    // fond : léger dégradé vertical
-    for y in 0..fb::HEIGHT as i32 {
-        let c = if y < (fb::HEIGHT as i32) / 2 {
-            PAL_BG_TOP
-        } else {
-            PAL_BG_BOT
-        };
-        fb::fill_rect(0, y, fb::WIDTH as i32, 1, c);
-    }
-
-    // barre de titre
-    fb::fill_rect(0, 0, fb::WIDTH as i32, BAR_H, PAL_BAR);
-    font::draw_str(4, 2, "NOTHING OS", PAL_BAR_TEXT, None);
+    fb::fill_rect(0, 0, W, H, PAL_BG);
+    fb::fill_rect(0, H * 2 / 3, W, H - H * 2 / 3, PAL_BG_DIM);
+    fb::fill_rect(0, 0, W, BAR_H, PAL_BAR);
+    font::draw_str(6, (BAR_H - 16) / 2 + 1, "NOTHING OS", PAL_BAR_TEXT, None);
 }
-
-// Position de la grille d'Asti : sorti (visible) vs caché (contre le bord).
-const OX_SHOWN: f32 = fb::WIDTH as f32 - 148.0;
-const OX_HIDDEN: f32 = fb::WIDTH as f32 - 18.0;
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
@@ -76,9 +66,10 @@ pub fn run(mut brain: asti::Brain) -> ! {
     mouse::init();
     shelf::init();
 
-    let mut out = 0.0_f32; // 0 = caché, 1 = sorti
+    let mut shelf_out = 0.0_f32; // 0 = repliée, 1 = dépliée
+    let mut leave_at = -10.0_f32;
     let mut last = time::now_secs();
-    let mut leave_at = 0.0_f32; // instant où la souris a quitté la zone
+    let mut click_latch = false;
 
     loop {
         let now = time::now_secs();
@@ -88,45 +79,44 @@ pub fn run(mut brain: asti::Brain) -> ! {
         mouse::poll();
         let m = mouse::state();
 
-        // Asti veut-il être sorti ? souris dans la bande droite, ou sur lui.
-        let ox = lerp(OX_HIDDEN, OX_SHOWN, out);
-        let (dcx, dcy) = asti::disc_center(ox);
+        // survol : sur Asti, ou sur l'étagère quand elle est sortie
+        let (dcx, dcy) = asti::disc_center(asti::HOME_OX);
         let rad = asti::disc_radius();
         let over_asti = {
             let (dx, dy) = (m.x as f32 - dcx, m.y as f32 - dcy);
-            dx * dx + dy * dy < (rad + 8.0) * (rad + 8.0)
+            dx * dx + dy * dy < (rad + 6.0) * (rad + 6.0)
         };
-        let in_band = m.x > fb::WIDTH as i32 - 48;
-        let over_shelf = out > 0.3 && shelf::hit(m.x, m.y).is_some();
-        let near = in_band || over_asti || over_shelf;
-        if near {
+        let over_shelf = shelf_out > 0.3 && shelf::hit(m.x, m.y).is_some();
+        if over_asti || over_shelf {
             leave_at = now;
         }
-        // reste sorti tant que la souris est là, + 0,5 s de sursis
+        // 0,5 s de sursis avant de replier
         let want = if now - leave_at < 0.5 { 1.0 } else { 0.0 };
-        out += (want - out) * (1.0 - libm::powf(0.5, dt * 7.0));
-        out = out.clamp(0.0, 1.0);
+        shelf_out += (want - shelf_out) * (1.0 - libm::powf(0.5, dt * 8.0));
+        shelf_out = shelf_out.clamp(0.0, 1.0);
 
-        // clic sur une friandise → on nourrit Asti
-        if m.left && out > 0.6 {
-            if let Some(kind) = shelf::hit(m.x, m.y) {
-                if shelf::take(kind, now) {
-                    feed(kind.boost());
-                    brain.react_feed(now);
+        // clic (front montant) sur une friandise → on nourrit Asti
+        if m.left && !click_latch {
+            if shelf_out > 0.6 {
+                if let Some(kind) = shelf::hit(m.x, m.y) {
+                    if shelf::take(kind, now) {
+                        feed(kind.boost());
+                        brain.react_feed(now);
+                    }
                 }
             }
         }
+        click_latch = m.left;
 
         let state = brain.update(now);
         let mut cv = asti::Canvas::new();
         asti::draw_creature(&mut cv, &state, now);
 
         draw_desktop();
-        let ox = lerp(OX_HIDDEN, OX_SHOWN, out);
-        asti::render(&cv, ox);
-        if out > 0.05 {
-            shelf::draw(out, now);
+        if shelf_out > 0.03 {
+            shelf::draw(shelf_out, now);
         }
+        asti::render(&cv, asti::HOME_OX);
         mouse::draw_cursor(m.x, m.y, PAL_CURSOR, PAL_CURSOR_EDGE);
         fb::present();
 

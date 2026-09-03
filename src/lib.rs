@@ -137,11 +137,11 @@ pub extern "C" fn rust_main() -> ! {
     time::init();
 
     font::capture(); // encore en mode texte : on récupère la police du BIOS
-    fb::set_mode13();
+    fb::init();
     asti::install_palette(asti::Tint::Null);
     home::install_palette();
 
-    serial_println!("[nothing-os] mode 13h : bureau + Asti");
+    serial_println!("[nothing-os] mode graphique : bureau + Asti");
 
     let brain = asti::Brain::new(time::seed());
     home::run(brain);

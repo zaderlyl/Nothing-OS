@@ -1,88 +1,97 @@
-//! Mode graphique VGA 13h : 320×200, 256 couleurs, framebuffer linéaire à
-//! l'adresse physique 0xA0000 (1 octet = 1 index de palette).
-//!
-//! On programme les registres VGA directement (pas de BIOS : on est déjà
-//! en long mode). Le jeu de valeurs ci-dessous est le "dump" standard du
-//! mode 13h. La palette DAC est 6-bit par canal.
+//! Framebuffer graphique via l'interface **Bochs VBE** (que QEMU expose
+//! avec `-vga std`) : résolution d'écran réelle, 256 couleurs (palette
+//! DAC), framebuffer linéaire dont l'adresse physique est lue dans le
+//! BAR0 PCI de la carte VGA.
 //!
 //! Le dessin se fait dans un back-buffer (`BACK`) puis `present()` le
 //! recopie d'un bloc vers la VRAM — pas de scintillement.
 
-use crate::port::{inb, outb};
+use crate::port::{inb, inl, outb, outl, outw};
 
-pub const WIDTH: usize = 320;
-pub const HEIGHT: usize = 200;
+pub const WIDTH: usize = 640;
+pub const HEIGHT: usize = 480;
 
-const FB_ADDR: usize = 0xA_0000;
+// --- Bochs VBE (Dispi) ---
+const VBE_INDEX: u16 = 0x01ce;
+const VBE_DATA: u16 = 0x01cf;
+const VBE_XRES: u16 = 1;
+const VBE_YRES: u16 = 2;
+const VBE_BPP: u16 = 3;
+const VBE_ENABLE: u16 = 4;
+const VBE_VIRT_WIDTH: u16 = 6;
+const VBE_ENABLED: u16 = 0x01;
+const VBE_LFB_ENABLED: u16 = 0x40;
 
-// --- registres ---
-const ATTR_ADDR: u16 = 0x3c0;
-const MISC_W: u16 = 0x3c2;
-const SEQ_ADDR: u16 = 0x3c4;
-const SEQ_DATA: u16 = 0x3c5;
-const GC_ADDR: u16 = 0x3ce;
-const GC_DATA: u16 = 0x3cf;
-const CRTC_ADDR: u16 = 0x3d4;
-const CRTC_DATA: u16 = 0x3d5;
-const INPUT_STATUS1: u16 = 0x3da;
+// --- palette DAC ---
 const DAC_WRITE_ADDR: u16 = 0x3c8;
 const DAC_DATA: u16 = 0x3c9;
 
-const MISC: u8 = 0x63;
-const SEQ: [u8; 5] = [0x03, 0x01, 0x0f, 0x00, 0x0e];
-const CRTC: [u8; 25] = [
-    0x5f, 0x4f, 0x50, 0x82, 0x54, 0x80, 0xbf, 0x1f, 0x00, 0x41, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x9c, 0x0e, 0x8f, 0x28, 0x40, 0x96, 0xb9, 0xa3, 0xff,
-];
-const GC: [u8; 9] = [0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x05, 0x0f, 0xff];
-const AC: [u8; 21] = [
-    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
-    0x41, 0x00, 0x0f, 0x00, 0x00,
-];
-
+static mut LFB: *mut u8 = core::ptr::null_mut();
 static mut BACK: [u8; WIDTH * HEIGHT] = [0; WIDTH * HEIGHT];
 
 fn back() -> *mut u8 {
     &raw mut BACK as *mut u8
 }
 
-/// Bascule la carte VGA en mode 13h.
-pub fn set_mode13() {
+fn vbe_write(index: u16, value: u16) {
     unsafe {
-        outb(MISC_W, MISC);
-
-        for (i, &v) in SEQ.iter().enumerate() {
-            outb(SEQ_ADDR, i as u8);
-            outb(SEQ_DATA, v);
-        }
-
-        // Déverrouille les registres CRTC (bit 7 de l'index 0x11).
-        outb(CRTC_ADDR, 0x11);
-        let v = inb(CRTC_DATA);
-        outb(CRTC_DATA, v & 0x7f);
-
-        for (i, &v) in CRTC.iter().enumerate() {
-            outb(CRTC_ADDR, i as u8);
-            let v = if i == 0x11 { v & 0x7f } else { v };
-            outb(CRTC_DATA, v);
-        }
-
-        for (i, &v) in GC.iter().enumerate() {
-            outb(GC_ADDR, i as u8);
-            outb(GC_DATA, v);
-        }
-
-        for (i, &v) in AC.iter().enumerate() {
-            let _ = inb(INPUT_STATUS1);
-            outb(ATTR_ADDR, i as u8);
-            outb(ATTR_ADDR, v);
-        }
-        let _ = inb(INPUT_STATUS1);
-        outb(ATTR_ADDR, 0x20); // réactive l'affichage
+        outw(VBE_INDEX, index);
+        outw(VBE_DATA, value);
     }
 }
 
-/// Programme une entrée de la palette (composantes 0..=255, tronquées 6 bits).
+// --- accès à l'espace de configuration PCI (mécanisme n°1) ---
+fn pci_read32(bus: u8, dev: u8, func: u8, off: u8) -> u32 {
+    let addr = 0x8000_0000
+        | (bus as u32) << 16
+        | (dev as u32) << 11
+        | (func as u32) << 8
+        | (off as u32 & 0xfc);
+    unsafe {
+        outl(0xcf8, addr);
+        inl(0xcfc)
+    }
+}
+
+/// Cherche le framebuffer linéaire : BAR0 du premier contrôleur
+/// d'affichage (classe PCI 0x03). Valeur de secours si rien trouvé.
+fn find_lfb() -> u32 {
+    for dev in 0..32u8 {
+        if pci_read32(0, dev, 0, 0x00) == 0xffff_ffff {
+            continue;
+        }
+        let class = pci_read32(0, dev, 0, 0x08) >> 24;
+        if class == 0x03 {
+            return pci_read32(0, dev, 0, 0x10) & 0xffff_fff0;
+        }
+    }
+    0xe000_0000
+}
+
+/// Passe l'écran en mode graphique `WIDTH×HEIGHT`, 8 bits par pixel.
+pub fn init() {
+    let lfb = find_lfb();
+    unsafe {
+        LFB = lfb as *mut u8;
+    }
+    crate::serial_println!("[nothing-os] framebuffer @ {:#x}", lfb);
+
+    vbe_write(VBE_ENABLE, 0);
+    vbe_write(VBE_XRES, WIDTH as u16);
+    vbe_write(VBE_YRES, HEIGHT as u16);
+    vbe_write(VBE_BPP, 8);
+    vbe_write(VBE_VIRT_WIDTH, WIDTH as u16);
+    vbe_write(VBE_ENABLE, VBE_ENABLED | VBE_LFB_ENABLED);
+
+    // certains chemins d'init laissent le DAC en mode 6 bits masqués ;
+    // on s'assure que le registre de masque est ouvert
+    unsafe {
+        let _ = inb(0x3c6);
+        outb(0x3c6, 0xff);
+    }
+}
+
+/// Programme une entrée de palette (composantes 0..=255, DAC 6 bits).
 pub fn set_palette(index: u8, r: u8, g: u8, b: u8) {
     unsafe {
         outb(DAC_WRITE_ADDR, index);
@@ -95,7 +104,9 @@ pub fn set_palette(index: u8, r: u8, g: u8, b: u8) {
 /// Recopie le back-buffer vers la VRAM.
 pub fn present() {
     unsafe {
-        core::ptr::copy_nonoverlapping(back(), FB_ADDR as *mut u8, WIDTH * HEIGHT);
+        if !LFB.is_null() {
+            core::ptr::copy_nonoverlapping(back(), LFB, WIDTH * HEIGHT);
+        }
     }
 }
 
@@ -110,14 +121,19 @@ pub fn put(x: i32, y: i32, color: u8) {
 }
 
 pub fn fill_rect(x: i32, y: i32, w: i32, h: i32, color: u8) {
-    for yy in y..(y + h) {
-        for xx in x..(x + w) {
-            put(xx, yy, color);
+    let x0 = x.max(0);
+    let y0 = y.max(0);
+    let x1 = (x + w).min(WIDTH as i32);
+    let y1 = (y + h).min(HEIGHT as i32);
+    for yy in y0..y1 {
+        let row = unsafe { back().add(yy as usize * WIDTH) };
+        for xx in x0..x1 {
+            unsafe { *row.add(xx as usize) = color };
         }
     }
 }
 
-/// Disque plein anti-crénelé grossièrement (test au rayon).
+/// Disque plein (test au rayon).
 pub fn fill_circle(cx: f32, cy: f32, rad: f32, color: u8) {
     let x0 = (cx - rad - 1.0) as i32;
     let x1 = (cx + rad + 1.0) as i32;
