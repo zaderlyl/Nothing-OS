@@ -44,14 +44,22 @@ rien n'est empilé ni mémorisé. `src/docview.rs`. La molette PS/2
 (IntelliMouse) est détectée au boot (`src/mouse.rs`).
 
 Un clic sur un **dossier** du partage y descend ; le **fil d'Ariane**
-`racine / … ` en haut du panneau, cliquable, permet de remonter. Les
-**images** (`.png`, `.jpg`, `.jpeg`) sont vraiment décodées et affichées
-(`src/image.rs`, crates `zune-png` / `zune-jpeg`, quantifiées vers un
-cube de 180 couleurs). Le tas du noyau est à 160 Mio pour ça et QEMU
-démarre avec `-m 1G`. Garde-fous : un fichier de plus de 24 Mio
-(`p9::size` via Tgetattr) → « fichier trop volumineux » ; un fichier
-non affichable (PDF, SVG, archives, audio/vidéo, binaire…) → « affichage
-non pris en compte » plutôt qu'un vidage d'octets.
+`racine / … ` en haut du panneau, cliquable, permet de remonter.
+
+- **Images** (`.png`, `.jpg`, `.jpeg`) : vraiment décodées et affichées
+  (`src/image.rs`, crates `zune-png` / `zune-jpeg`), réduites par moyenne
+  de bloc autant qu'il faut et quantifiées vers un cube de 180 couleurs.
+  Le tas noyau est à 512 Mio pour ça, QEMU démarre avec `-m 1G`.
+- **Audio** (`.mp3`, `.wav`) : petit panneau lecteur (pas toute la
+  largeur) avec play / pause, barre de progression cliquable, vitesses
+  x1 / x1.5 / x2. Décodage : `src/wav.rs` (RIFF/PCM) et `src/mp3.rs`
+  (minimp3 via `rmp3`, compilé en C cross-target — voir `cshim/`).
+  Sortie son : pilote **AC'97** `src/ac97.rs`.
+- **Vidéo** (`.mp4`, `.mov`, …) : « lecture vidéo indisponible » — pas de
+  décodeur H.264 en bare-metal.
+- Garde-fous : fichier > 24 Mio (images : 160 Mio) → « fichier trop
+  volumineux » ; fichier non affichable (PDF, archives, binaire…) →
+  « affichage non pris en compte » plutôt qu'un vidage d'octets.
 
 À gauche, une barre latérale cachée (tâches, résumé, heure) qui glisse au
 frôlement du bord. En haut à droite, **Asti** — le compagnon, un portage
@@ -271,11 +279,16 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
 - ✅ Terminal (`src/term.rs`) : mini shell réel qui agit sur le fs.
 - ✅ Éditeur de texte (`src/editor.rs`) : édition réelle (curseur,
   flèches, multi-lignes), écrit dans le fichier fs directement.
-- ✅ Allocateur de tas (`src/heap.rs`) : 16 Mio en `.bss`,
+- ✅ Allocateur de tas (`src/heap.rs`) : 512 Mio en `.bss`,
   `linked_list_allocator` → `Vec` / `String` / `Box` disponibles.
 - ✅ Partage 9p (`src/pci.rs`, `src/virtio.rs`, `src/p9.rs`,
   `src/hostfs.rs`) : `~/Documents` du Mac lu/écrit depuis Nothing OS via
-  `/fichier` et `/document`.
+  `/fichier` et `/doc`.
+- ✅ Consultation `/doc` (`src/docview.rs`) : panneaux glissants, sous-
+  dossiers + fil d'Ariane, aperçu images (`src/image.rs`) et lecteur
+  audio.
+- ✅ Son (`src/ac97.rs`) : pilote AC'97 (PCM stéréo 16 bits). Décodeurs
+  `src/wav.rs` et `src/mp3.rs` (minimp3).
 
 ## Prochaines étapes possibles
 
@@ -284,7 +297,9 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
 - **Lancement en kiosque** : démarrer Nothing OS directement à
   l'allumage.
 - **Timer (PIT, IRQ0)** : faim d'Asti qui descend + jauge visible.
-- Souris / clavier / timer en **interruptions** au lieu du polling.
+- **Streaming audio** : décoder le MP3 au fil de la lecture (aujourd'hui
+  tout est décodé d'un coup → gel de l'UI sur un long fichier).
+- Souris / clavier / timer / son en **interruptions** au lieu du polling.
 - Sauvegarde explicite dans l'éditeur (Ctrl+S), copier/coller, molette.
 - Redimensionner les fenêtres, une vraie barre des tâches.
 - Porter plus de poses/teintes de PC Pet (bâillement, sommeil la "nuit",
