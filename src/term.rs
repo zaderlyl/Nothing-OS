@@ -1,3 +1,4 @@
+#![allow(dead_code, static_mut_refs)]
 //! Terminal : un mini shell qui agit sur le système de fichiers RAM.
 //! Un seul terminal actif à la fois (état global).
 

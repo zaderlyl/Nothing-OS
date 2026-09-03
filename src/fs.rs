@@ -1,3 +1,4 @@
+#![allow(dead_code, static_mut_refs)]
 //! Système de fichiers en RAM (pas de disque pour l'instant, donc tout
 //! est perdu au redémarrage). Emplacements de taille fixe, aucun
 //! allocateur : c'est un noyau jouet, on préfère la simplicité et la

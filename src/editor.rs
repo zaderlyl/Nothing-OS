@@ -1,6 +1,8 @@
 //! Éditeur de texte : édite directement le contenu d'un fichier du
 //! système de fichiers RAM ([`crate::fs`]). Un état par fenêtre.
 
+#![allow(dead_code, static_mut_refs)]
+
 use crate::{fb, fs, font};
 
 // codes spéciaux émis par kbd pour les flèches
@@ -169,25 +171,20 @@ pub fn draw(win: usize, x: i32, y: i32, w: i32, h: i32, focused: bool, t: f32) {
     fb::fill_rect(x, y, w, h, 71); // P_CODE_BG
     fb::fill_rect(x, y, 52, h, 65); // marge n° de ligne
 
-    let mut line = 0usize;
-    let mut col = 0i32;
+    let start = offset_of_line(&f.data[..f.len], ed.top_line);
+    let mut line = ed.top_line;
     let mut sx = x + 60;
     let mut sy = y + PAD;
-    let start = offset_of_line(&f.data[..f.len], ed.top_line);
-    line = ed.top_line;
-    if line - ed.top_line < rows {
-        font::draw_num(x + 8, sy, (line + 1) as u32, 3, 69, 1);
-    }
+    font::draw_num(x + 8, sy, (line + 1) as u32, 3, 69, 1);
     for &b in &f.data[start..f.len] {
         if line >= ed.top_line + rows {
             break;
         }
         if b == b'\n' {
             line += 1;
-            col = 0;
             sx = x + 60;
             sy = y + PAD + (line - ed.top_line) as i32 * LH;
-            if line - ed.top_line < rows {
+            if line < ed.top_line + rows {
                 font::draw_num(x + 8, sy, (line + 1) as u32, 3, 69, 1);
             }
             continue;
@@ -196,7 +193,6 @@ pub fn draw(win: usize, x: i32, y: i32, w: i32, h: i32, focused: bool, t: f32) {
             font::draw_char(sx, sy, b, 68, None); // P_TEXT
         }
         sx += 8;
-        col += 1;
     }
 
     // curseur
