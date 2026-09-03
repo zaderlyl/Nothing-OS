@@ -8,7 +8,8 @@ commande** :
 
 | commande | effet |
 |---|---|
-| `/app terminal` | un vrai terminal (`ls`, `cat`, `echo`, `mkdir`, `write`, `rm`, `date`...) |
+| `/app` | ouvre le lanceur (panneau glissant) : VS Code, Affinity, Discord → **plein écran**, Asti au premier plan avec l'humeur de l'appli |
+| `/app terminal` | un vrai terminal (`ls`, `cat`, `echo`, `mkdir`, `write`, `rm`, `date`...) — fenêtre classique |
 | `/app editeur` | un vrai éditeur de texte |
 | `/app calc` | une calculatrice |
 | `/fichier <nom>` | ouvre (ou crée) le fichier dans l'éditeur — sur le Mac si le partage 9p est présent |
@@ -288,7 +289,11 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
   dossiers + fil d'Ariane, aperçu images (`src/image.rs`) et lecteur
   audio.
 - ✅ Son (`src/ac97.rs`) : pilote AC'97 (PCM stéréo 16 bits). Décodeurs
-  `src/wav.rs` et `src/mp3.rs` (minimp3).
+  `src/wav.rs` et `src/mp3.rs` (minimp3). Asti prend la personnalité
+  « musique » pendant la lecture.
+- ✅ Applis plein écran (`src/apps.rs`) : `/app` → lanceur → VS Code /
+  Affinity / Discord (chat fonctionnel), Asti au-dessus avec l'humeur
+  de l'appli.
 
 ## Prochaines étapes possibles
 
