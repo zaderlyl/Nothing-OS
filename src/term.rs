@@ -98,6 +98,7 @@ fn run(line: &[u8]) {
             out(b"date         heure courante");
             out(b"feed         nourrit Asti (+10)");
             out(b"hunger       niveau de faim d'Asti");
+            out(b"mem          memoire du tas");
             out(b"sync         enregistre sur le disque");
             out(b"clear        efface l'ecran");
         }
@@ -201,6 +202,21 @@ fn run(line: &[u8]) {
             FULL = false;
         },
         b"whoami" => out(b"utilisateur de Nothing OS"),
+        b"mem" => {
+            let (used, free) = crate::heap::stats();
+            let mut du = [0u8; 12];
+            let mut df = [0u8; 12];
+            let nu = utoa((used / 1024) as u32, &mut du);
+            let nf = utoa((free / 1024) as u32, &mut df);
+            let mut b = [0u8; LW];
+            let mut p = 0;
+            for s in [b"tas: ".as_ref(), &du[..nu], b" Kio utilises, ", &df[..nf], b" Kio libres"] {
+                let n = s.len().min(LW - p);
+                b[p..p + n].copy_from_slice(&s[..n]);
+                p += n;
+            }
+            out(&b[..p]);
+        }
         _ => out2(b"commande inconnue: ", cmd),
     }
     let _ = eq;

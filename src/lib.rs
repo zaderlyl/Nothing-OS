@@ -14,6 +14,9 @@
 
 #![no_std]
 #![feature(abi_x86_interrupt)]
+#![feature(alloc_error_handler)]
+
+extern crate alloc;
 
 mod asti;
 mod ata;
@@ -22,6 +25,7 @@ mod fb;
 mod font;
 mod fs;
 mod gdt;
+mod heap;
 mod home;
 mod interrupts;
 mod kbd;
@@ -143,6 +147,7 @@ pub extern "C" fn rust_main() -> ! {
 
     time::init();
 
+    heap::init(); // allocateur : débloque Vec / String / Box
     font::capture(); // encore en mode texte : on récupère la police du BIOS
     fs::init();
     fs::load(); // remplace les fichiers par défaut si le disque a une image
