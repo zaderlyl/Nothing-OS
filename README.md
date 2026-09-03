@@ -47,8 +47,11 @@ Un clic sur un **dossier** du partage y descend ; le **fil d'Ariane**
 `racine / … ` en haut du panneau, cliquable, permet de remonter. Les
 **images** (`.png`, `.jpg`, `.jpeg`) sont vraiment décodées et affichées
 (`src/image.rs`, crates `zune-png` / `zune-jpeg`, quantifiées vers un
-cube de 180 couleurs) ; `.svg` montre sa source. Le tas du noyau est à
-160 Mio pour ça et QEMU démarre avec `-m 1G`.
+cube de 180 couleurs). Le tas du noyau est à 160 Mio pour ça et QEMU
+démarre avec `-m 1G`. Garde-fous : un fichier de plus de 24 Mio
+(`p9::size` via Tgetattr) → « fichier trop volumineux » ; un fichier
+non affichable (PDF, SVG, archives, audio/vidéo, binaire…) → « affichage
+non pris en compte » plutôt qu'un vidage d'octets.
 
 À gauche, une barre latérale cachée (tâches, résumé, heure) qui glisse au
 frôlement du bord. En haut à droite, **Asti** — le compagnon, un portage
