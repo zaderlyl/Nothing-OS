@@ -27,9 +27,11 @@ pub struct Time {
 
 /// Heure courante (heure locale telle que vue par le CMOS).
 pub fn now() -> Time {
-    // on attend la fin d'une éventuelle mise à jour, puis on lit
-    while updating() {
+    // on attend la fin d'une éventuelle mise à jour (borné : jamais bloquer)
+    let mut guard = 0;
+    while updating() && guard < 100_000 {
         core::hint::spin_loop();
+        guard += 1;
     }
     let sec = read(0x00);
     let min = read(0x02);

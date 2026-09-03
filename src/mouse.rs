@@ -65,11 +65,23 @@ static mut RIGHT: bool = false;
 static mut PKT: [u8; 3] = [0; 3];
 static mut PHASE: usize = 0;
 
+fn flush() {
+    // vide tout ce qui traîne dans le tampon de sortie du contrôleur
+    for _ in 0..1024 {
+        if unsafe { inb(STATUS) } & 0x01 == 0 {
+            return;
+        }
+        unsafe {
+            let _ = inb(DATA);
+        }
+    }
+}
+
 pub fn init() {
+    flush();
     ctrl_cmd(0xa8); // active le port souris
 
-    // octet de config : autorise l'horloge souris (on laisse l'IRQ12
-    // désactivée, on est en polling)
+    // octet de config : autorise l'horloge souris (IRQ12 laissée désactivée)
     ctrl_cmd(0x20);
     wait_output_full();
     let mut cfg = unsafe { inb(DATA) };
@@ -80,28 +92,41 @@ pub fn init() {
 
     write_mouse(0xf6); // réglages par défaut
     write_mouse(0xf3); // set sample rate...
-    write_mouse(40); // ...40 Hz
+    write_mouse(20); // ...20 Hz (assez pour du polling, peu de trafic)
     write_mouse(0xf4); // active le flux
+    flush();
 }
 
 /// Vide le port et met à jour l'état. À appeler très souvent.
+///
+/// Points clés :
+///  - on lit TOUJOURS l'octet dès que le tampon est plein, même s'il
+///    vient du clavier — sinon un octet clavier coincé (le tampon ne fait
+///    qu'un octet) bloque définitivement les octets souris ;
+///  - un paquet n'est appliqué que si son 1ᵉʳ octet a le bit 3 à 1
+///    (toujours vrai pour une vraie souris) ; sinon on se resynchronise.
 pub fn poll() {
     unsafe {
-        // au plus quelques dizaines d'octets par appel
-        for _ in 0..64 {
-            if inb(STATUS) & 0x21 != 0x21 {
-                return; // rien qui vienne de la souris
+        for _ in 0..96 {
+            let st = inb(STATUS);
+            if st & 0x01 == 0 {
+                return; // plus rien
             }
             let b = inb(DATA);
+            if st & 0x20 == 0 {
+                continue; // octet clavier → jeté, on continue de vider
+            }
 
             if PHASE == 0 && b & 0x08 == 0 {
-                continue; // resync : le 1er octet a toujours le bit 3 à 1
+                continue; // pas un 1ᵉʳ octet valide → resync
             }
             PKT[PHASE] = b;
             PHASE += 1;
             if PHASE == 3 {
                 PHASE = 0;
-                apply(PKT[0], PKT[1], PKT[2]);
+                if PKT[0] & 0x08 != 0 {
+                    apply(PKT[0], PKT[1], PKT[2]);
+                }
             }
         }
     }

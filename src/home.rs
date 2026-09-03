@@ -193,9 +193,13 @@ pub fn run(mut brain: asti::Brain) -> ! {
         fb::present();
         prev_mx = m.x;
 
-        while time::now_secs() - now < 1.0 / 30.0 {
+        // cadence ~30 img/s ; garde-fou pour ne JAMAIS boucler sans fin
+        // même si l'horloge déraille.
+        let mut guard = 0u32;
+        while time::now_secs() - now < 1.0 / 30.0 && guard < 3_000_000 {
             mouse::poll();
             core::hint::spin_loop();
+            guard += 1;
         }
     }
 }
