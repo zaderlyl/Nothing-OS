@@ -4,7 +4,7 @@
 //!
 //! Il n'y a pas de disque : tout vit en RAM et disparaît au redémarrage.
 
-use crate::{editor, fb, font, fs, term};
+use crate::{dots, editor, fb, font, fs, term};
 
 const MAX: usize = 6;
 const TITLE_H: i32 = 30;
@@ -57,6 +57,19 @@ struct Win {
     y: i32,
     w: i32,
     h: i32,
+}
+
+/// Logo en points de l'application (style « friandise »).
+pub fn app_glyph(app: App) -> &'static [&'static str] {
+    match app {
+        App::Editor => dots::EDITOR,
+        App::Terminal => dots::TERMINAL,
+        App::Files => dots::FOLDER,
+        App::Web => dots::WEB,
+        App::Hub => dots::HEART,
+        App::Calc => dots::CALC,
+        App::Unknown => dots::QUESTION,
+    }
 }
 
 impl Win {
@@ -270,7 +283,8 @@ fn draw_window(slot: usize, w: &Win, kb: bool, t: f32) {
     fb::fill_rect(w.x - 1, w.y - 1, w.w + 2, w.h + TITLE_H + 2, fc);
 
     fb::fill_rect(w.x, w.y, w.w, TITLE_H, if kb { P_TITLE_HI } else { P_TITLE });
-    font::draw_str_scaled(w.x + 12, w.y + 7, w.title(), P_TEXT, 2);
+    dots::draw_centered(app_glyph(w.app), w.x + 8, w.y, 22, TITLE_H, 2, P_TEXT, P_DIM);
+    font::draw_str_scaled(w.x + 38, w.y + 7, w.title(), P_TEXT, 2);
     fb::fill_rect(w.x + w.w - 24, w.y + 6, 18, 18, P_CLOSE);
     font::draw_str_scaled(w.x + w.w - 22, w.y + 6, "x", P_TEXT, 2);
 
@@ -285,9 +299,10 @@ fn draw_window(slot: usize, w: &Win, kb: bool, t: f32) {
         App::Hub => draw_hub(bx, by, bw, bh),
         App::Calc => draw_calc(slot, bx, by, bw, bh),
         App::Unknown => {
-            font::draw_str_scaled(bx + 40, by + 50, w.arg(), P_TEXT, 3);
-            font::draw_str_scaled(bx + 40, by + 110, "application non disponible.", P_DIM, 2);
-            font::draw_str_scaled(bx + 40, by + 150, "essaie: /app editeur  /app terminal  /app calc", P_DIM, 2);
+            dots::draw_centered(dots::QUESTION, bx, by + 40, bw, 90, 7, P_DIM, P_TITLE_HI);
+            font::draw_str_scaled(bx + 40, by + 160, w.arg(), P_TEXT, 3);
+            font::draw_str_scaled(bx + 40, by + 220, "application non disponible.", P_DIM, 2);
+            font::draw_str_scaled(bx + 40, by + 260, "essaie: /app editeur  /app terminal  /app calc", P_DIM, 2);
         }
     }
 }
@@ -300,15 +315,13 @@ fn draw_files(bx: i32, by: i32, bw: i32, _bh: i32) {
     let mut tile = |name: &str, dir: bool, host: bool, i: &mut i32| {
         let cx = bx + 24 + (*i % cols) * 190;
         let cy = by + 64 + (*i / cols) * 120;
-        let c = if dir { P_ACCENT } else { P_TITLE_HI };
-        fb::fill_rect(cx, cy, 60, 74, c);
-        if dir {
-            fb::fill_rect(cx + 8, cy + 6, 24, 10, P_BODY);
-        }
+        let pat = if dir { dots::FOLDER } else { dots::FILE };
+        dots::draw(pat, cx, cy, 5, P_TEXT, P_DIM);
         if host {
-            fb::fill_rect(cx + 44, cy + 58, 12, 12, P_STR); // pastille = Mac
+            // pastille = fichier du Mac (partage 9p)
+            fb::fill_rect(cx + 46, cy + 2, 10, 10, P_STR);
         }
-        font::draw_str_scaled(cx, cy + 84, name, P_TEXT, 2);
+        font::draw_str_scaled(cx, cy + 78, name, if dir { P_TEXT } else { P_DIM }, 2);
         *i += 1;
     };
 
@@ -372,15 +385,12 @@ fn contains_ci(hay: &[u8], needle: &[u8]) -> bool {
 
 fn draw_hub(bx: i32, by: i32, bw: i32, _bh: i32) {
     font::draw_str_dots(bx + (bw - 6 * 8 * 6) / 2, by + 24, "PC PET", P_TEXT, 6);
-    font::draw_str_scaled(bx + 40, by + 150, "Compagnon  : Asti", P_TEXT, 2);
-    font::draw_str_scaled(bx + 40, by + 190, "Nourriture :", P_DIM, 2);
-    let f = crate::home::food() as i32;
-    fb::fill_rect(bx + 240, by + 190, 3 * f, 16, P_ACCENT);
-    fb::fill_rect(bx + 240 + 3 * f, by + 190, 3 * (100 - f), 16, P_TITLE_HI);
-    font::draw_str_scaled(bx + 40, by + 236, "Il reste au-dessus de toutes", P_DIM, 2);
-    font::draw_str_scaled(bx + 40, by + 262, "les fenetres et suit l'appli active.", P_DIM, 2);
-    font::draw_str_scaled(bx + 40, by + 320, "Glisse une friandise sur lui pour", P_DIM, 2);
-    font::draw_str_scaled(bx + 40, by + 346, "le nourrir.", P_DIM, 2);
+    dots::draw_centered(dots::HEART, bx, by + 120, bw, 90, 8, P_ACCENT, P_TITLE_HI);
+    font::draw_str_scaled(bx + 40, by + 236, "Compagnon : Asti", P_TEXT, 2);
+    font::draw_str_scaled(bx + 40, by + 288, "Il reste au-dessus de toutes les", P_DIM, 2);
+    font::draw_str_scaled(bx + 40, by + 314, "fenetres et suit l'appli active.", P_DIM, 2);
+    font::draw_str_scaled(bx + 40, by + 366, "Glisse une friandise sur lui pour", P_DIM, 2);
+    font::draw_str_scaled(bx + 40, by + 392, "le faire reagir.", P_DIM, 2);
 }
 
 // --- calculatrice ---
