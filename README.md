@@ -12,7 +12,7 @@ commande** :
 | `/app editeur` | un vrai éditeur de texte |
 | `/app calc` | une calculatrice |
 | `/fichier <nom>` | ouvre (ou crée) le fichier dans l'éditeur — sur le Mac si le partage 9p est présent |
-| `/document` | liste les fichiers (partage du Mac + fichiers RAM) |
+| `/doc` (ou `/doc all`) | consulte les documents dans un panneau glissant (voir plus bas) |
 | `/web <mots>` | recherche **locale** dans les fichiers (pas de réseau) |
 
 Les fichiers vivent dans un **système de fichiers** (`src/fs.rs`) rendu
@@ -34,6 +34,14 @@ actuelles : lecture plafonnée à `fs::FCAP` (12 Kio, les fichiers plus
 gros sont ouverts en lecture seule), pas de sous-dossiers dans l'appli
 Fichiers, collision si deux fichiers de dossiers différents ont le même
 nom.
+
+**Consultation de documents** (`/doc`) : ce ne sont pas des fenêtres
+classiques. La **liste** entre par la gauche (molette pour défiler) ; un
+clic sur un fichier fait entrer sa **visualisation** par la droite, avec
+un espace au milieu. On ferme en cliquant dans cet espace / en dehors
+(le panneau du dessus « se retire », droite puis gauche) ou avec Échap —
+rien n'est empilé ni mémorisé. `src/docview.rs`. La molette PS/2
+(IntelliMouse) est détectée au boot (`src/mouse.rs`).
 
 À gauche, une barre latérale cachée (tâches, résumé, heure) qui glisse au
 frôlement du bord. En haut à droite, **Asti** — le compagnon, un portage
