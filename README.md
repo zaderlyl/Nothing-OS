@@ -80,32 +80,53 @@ tout le bricolage `memcpy`/`eh_personality`.
 
 ## Construire et lancer
 
-Prérequis (Linux ; voir la note macOS plus bas) :
+QEMU sait charger une image *Multiboot* directement (`qemu -kernel ...`),
+sans GRUB : pas besoin de `grub-mkrescue`. C'est la voie par défaut du
+`Makefile`, et elle marche pareil sur **macOS** et **Linux**.
+
+### macOS (Apple Silicon ou Intel)
 
 ```bash
-# Debian/Ubuntu
-sudo apt install nasm qemu-system-x86 grub-pc-bin grub-common xorriso mtools
-# + une toolchain Rust stable (rustup.rs, ou via ton gestionnaire de paquets)
+# 1. Outils (Homebrew)
+brew install rustup nasm qemu lld     # lld fournit `ld.lld`, l'éditeur de liens
+rustup-init -y && source "$HOME/.cargo/env"
+rustup target add x86_64-unknown-linux-gnu   # core/std x86_64 précompilés
+
+# 2. Construire + lancer
+make run            # fenêtre QEMU (VGA) : tu dois voir l'accueil "Asti"
+make run-headless   # sans fenêtre, traces de boot sur le port série
+```
+
+Sur un Mac ARM, QEMU émule un x86_64 complet (plus lent qu'en natif, mais
+imperceptible pour un noyau aussi petit).
+
+### Linux
+
+```bash
+# Debian/Ubuntu — pour `make run` :
+sudo apt install nasm qemu-system-x86 lld
+rustup target add x86_64-unknown-linux-gnu
+
+# en plus, pour la voie GRUB/ISO (`make iso` / `make run-iso`) :
+sudo apt install grub-pc-bin grub-common xorriso mtools
 ```
 
 ```bash
-make            # build kernel.bin + nothing-os.iso
-make run        # build puis lance dans QEMU avec un écran
-make run-headless   # pareil mais sans fenêtre, sortie sur le port série
+make run        # QEMU direct (Multiboot, sans GRUB)
+make iso        # construit nothing-os.iso via GRUB
+make run-iso    # lance l'ISO GRUB dans QEMU
 ```
 
-### Note pour macOS
+### Si `ld.lld` n'est pas dispo
 
-`grub-mkrescue` est pénible à avoir sur macOS (il faut une version
-croisée de GRUB, ex. via un tap Homebrew type `x86_64-elf-grub`, pas
-toujours maintenu). Le plus simple pour itérer sur ce projet depuis ton
-Mac :
+L'édition de liens finale a juste besoin d'un linker qui produit de
+l'ELF64 et comprend un linker script. Alternatives à `ld.lld` :
 
-- soit installer `nasm` et `qemu` via Homebrew et me redemander de
-  reconstruire/tester dans cet environnement cloud (qui a déjà tout
-  l'outillage GRUB) ;
-- soit lancer ce dépôt dans un conteneur Linux (Docker Desktop, ou une
-  image `ubuntu` avec les paquets ci-dessus) sur ta machine.
+```bash
+make run LD=ld                    # le `ld` GNU (Linux)
+brew install x86_64-elf-binutils  # puis :
+make run LD=x86_64-elf-ld         # cross-binutils (macOS)
+```
 
 ## Débogage
 
