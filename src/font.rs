@@ -2,6 +2,8 @@
 //! de la mémoire vidéo (tant qu'on est encore en mode texte), on la garde
 //! dans un tableau, et on la redessine pixel par pixel en mode graphique.
 
+#![allow(dead_code)]
+
 use crate::fb;
 use crate::port::{inb, outb};
 
@@ -60,15 +62,33 @@ pub fn capture() {
 
 /// Dessine un caractère (code page 437). `bg = None` → fond transparent.
 pub fn draw_char(x: i32, y: i32, ch: u8, fg: u8, bg: Option<u8>) {
+    draw_char_scaled(x, y, ch, fg, bg, 1);
+}
+
+/// Idem, mais chaque pixel du glyphe devient un pavé `scale × scale`.
+pub fn draw_char_scaled(x: i32, y: i32, ch: u8, fg: u8, bg: Option<u8>, scale: i32) {
     let glyph = unsafe { &FONT[ch as usize] };
     for (row, bits) in glyph.iter().enumerate() {
-        for col in 0..8 {
-            if bits & (0x80 >> col) != 0 {
-                fb::put(x + col, y + row as i32, fg);
-            } else if let Some(b) = bg {
-                fb::put(x + col, y + row as i32, b);
+        for col in 0..8i32 {
+            let on = bits & (0x80 >> col) != 0;
+            let c = if on {
+                Some(fg)
+            } else {
+                bg
+            };
+            if let Some(c) = c {
+                fb::fill_rect(x + col * scale, y + row as i32 * scale, scale, scale, c);
             }
         }
+    }
+}
+
+/// Chaîne à l'échelle `scale` (avance de `8 * scale` par caractère).
+pub fn draw_str_scaled(x: i32, y: i32, s: &str, fg: u8, scale: i32) {
+    let mut cx = x;
+    for &b in s.as_bytes() {
+        draw_char_scaled(cx, y, b, fg, None, scale);
+        cx += 8 * scale;
     }
 }
 
@@ -78,5 +98,14 @@ pub fn draw_str(x: i32, y: i32, s: &str, fg: u8, bg: Option<u8>) {
     for &b in s.as_bytes() {
         draw_char(cx, y, b, fg, bg);
         cx += 8;
+    }
+}
+
+/// Entier sur `digits` chiffres (zéros à gauche), à l'échelle `scale`.
+pub fn draw_num(x: i32, y: i32, mut n: u32, digits: usize, fg: u8, scale: i32) {
+    for i in (0..digits).rev() {
+        let d = (n % 10) as u8;
+        n /= 10;
+        draw_char_scaled(x + i as i32 * 8 * scale, y, b'0' + d, fg, None, scale);
     }
 }

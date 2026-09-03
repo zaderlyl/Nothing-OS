@@ -8,8 +8,8 @@
 
 use crate::port::{inb, inl, outb, outl, outw};
 
-pub const WIDTH: usize = 640;
-pub const HEIGHT: usize = 480;
+pub const WIDTH: usize = 1920;
+pub const HEIGHT: usize = 1080;
 
 // --- Bochs VBE (Dispi) ---
 const VBE_INDEX: u16 = 0x01ce;
@@ -110,6 +110,14 @@ pub fn present() {
     }
 }
 
+/// Remplit tout le back-buffer d'une couleur.
+#[allow(dead_code)]
+pub fn clear(color: u8) {
+    unsafe {
+        core::ptr::write_bytes(back(), color, WIDTH * HEIGHT);
+    }
+}
+
 #[inline(always)]
 pub fn put(x: i32, y: i32, color: u8) {
     if x < 0 || y < 0 || x >= WIDTH as i32 || y >= HEIGHT as i32 {
@@ -125,10 +133,13 @@ pub fn fill_rect(x: i32, y: i32, w: i32, h: i32, color: u8) {
     let y0 = y.max(0);
     let x1 = (x + w).min(WIDTH as i32);
     let y1 = (y + h).min(HEIGHT as i32);
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let span = (x1 - x0) as usize;
     for yy in y0..y1 {
-        let row = unsafe { back().add(yy as usize * WIDTH) };
-        for xx in x0..x1 {
-            unsafe { *row.add(xx as usize) = color };
+        unsafe {
+            core::ptr::write_bytes(back().add(yy as usize * WIDTH + x0 as usize), color, span);
         }
     }
 }

@@ -392,12 +392,12 @@ pub fn install_palette(t: Tint) {
 // ---------------------------------------------------------------------
 
 /// Taille d'un point de matrice, en pixels écran.
-const CELL: f32 = 9.5;
-/// `oy` fixe : Asti est calé en haut, juste sous la barre de titre.
-const OY: f32 = 20.0;
+const CELL: f32 = 16.0;
+/// `oy` fixe : Asti est calé en haut.
+const OY: f32 = 62.0;
 
 /// Origine de grille quand Asti est à sa place (coin haut-droit).
-pub const HOME_OX: f32 = fb::WIDTH as f32 - N as f32 * CELL - 16.0;
+pub const HOME_OX: f32 = fb::WIDTH as f32 - N as f32 * CELL - 56.0;
 
 /// Indice de palette du liseré du boîtier.
 const PAL_RIM: u8 = 3;

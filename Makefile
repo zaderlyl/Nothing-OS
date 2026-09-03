@@ -45,7 +45,7 @@ ISO        := nothing-os.iso
 
 QEMU_FLAGS := -no-reboot -no-shutdown
 
-.PHONY: all kernel iso run run-headless run-iso clean
+.PHONY: all kernel iso run run-window run-headless run-iso clean
 
 all: $(KERNEL_BIN)
 
@@ -76,8 +76,14 @@ $(KERNEL_MB): kernel $(BUILD_DIR)/boot-mb.o $(BUILD_DIR)/long_mode.o $(LINKER)
 		$(KERNEL_LIB)
 
 # --- Lancement direct (PVH, sans GRUB) -------------------------------
+# `-full-screen` : la fenêtre QEMU occupe tout l'écran (⌃⌘F pour sortir,
+#  ⌥⌘G pour libérer la souris sur macOS).
 run: $(KERNEL_BIN)
-	$(QEMU) -kernel $(KERNEL_BIN) -serial stdio $(QEMU_FLAGS)
+	$(QEMU) -kernel $(KERNEL_BIN) -vga std -full-screen -serial stdio $(QEMU_FLAGS)
+
+# fenêtré (utile pour déboguer)
+run-window: $(KERNEL_BIN)
+	$(QEMU) -kernel $(KERNEL_BIN) -vga std -serial stdio $(QEMU_FLAGS)
 
 run-headless: $(KERNEL_BIN)
 	$(QEMU) -kernel $(KERNEL_BIN) -display none -serial stdio $(QEMU_FLAGS)

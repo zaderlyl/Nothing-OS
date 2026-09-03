@@ -168,12 +168,12 @@ pub fn install_palette() {
 }
 
 // --- géométrie ---
-const CELL: i32 = 24; // hauteur d'une case friandise
-const SLOT: i32 = CELL + 4;
-const PANEL_W: i32 = 26;
-const TOP: i32 = (fb::HEIGHT as i32 - SLOT * ALL.len() as i32) / 2 + 4;
+const CELL: i32 = 44; // hauteur d'une case friandise
+const SLOT: i32 = CELL + 8;
+const PANEL_W: i32 = 52;
+const TOP: i32 = (fb::HEIGHT as i32 - SLOT * ALL.len() as i32) / 2;
 /// Colonne du panneau quand l'étagère est sortie (à gauche d'Asti)...
-const X_SHOWN: i32 = crate::asti::HOME_OX as i32 - PANEL_W - 16;
+const X_SHOWN: i32 = crate::asti::HOME_OX as i32 - PANEL_W - 72;
 /// ...et quand elle est repliée (coulissée hors écran, derrière Asti).
 const X_HIDDEN: i32 = fb::WIDTH as i32 + 6;
 
@@ -241,9 +241,9 @@ pub fn draw(out: f32, now: f32) {
     }
 }
 
-/// Un point du motif = un pavé `SCALE×SCALE` avec un léger espace, pour
-/// garder l'aspect "matrice de LED" comme sur Asti.
-const SCALE: i32 = 2;
+/// Un point du motif = un pavé `SCALE×SCALE`, pour garder l'aspect
+/// "matrice de LED" comme sur Asti.
+const SCALE: i32 = 3;
 
 fn draw_treat(kind: Kind, ox: i32, oy: i32) {
     let pat = kind.pattern();

@@ -23,6 +23,7 @@ mod home;
 mod interrupts;
 mod mouse;
 mod port;
+mod rtc;
 mod serial;
 mod shelf;
 mod time;

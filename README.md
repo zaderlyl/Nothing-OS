@@ -2,12 +2,12 @@
 
 Un mini noyau "bare metal" x86_64, écrit en Rust, qui boot dans QEMU.
 
-L'idée : un "OS" minimaliste. Un bureau plein écran (barre de titre,
-fond, curseur souris) et c'est tout... sauf **Asti**, le compagnon, qui
-vit caché contre le bord droit. Quand la souris s'en approche, il
-coulisse pour apparaître et son **étagère de friandises** se déplie ;
-un clic sur une friandise le nourrit, puis il se retire quand la souris
-repart.
+L'idée : un "OS" minimaliste en 1920×1080, fond noir. À gauche une barre
+avec les **tâches à faire** en haut et un **résumé** (mail, agenda,
+système, heure) en bas. En haut à droite, **Asti** — le compagnon,
+toujours visible. Son **étagère de friandises** est cachée et se déplie
+quand la souris passe sur lui ; un clic sur une friandise le nourrit,
+puis l'étagère se replie quand la souris repart.
 
 Asti est un portage direct du moteur de rendu de l'appli « PC Pet » : une
 matrice de LED circulaire qui cligne des yeux, regarde autour d'elle, et
@@ -106,8 +106,9 @@ rustup default stable                 # installe la toolchain Rust stable
 rustup target add x86_64-unknown-linux-gnu   # core/std x86_64 précompilés
 
 # 2. Construire + lancer
-make run            # fenêtre QEMU : Asti en haut à droite
-make run-headless   # sans fenêtre, traces de boot sur le port série
+make run            # QEMU plein écran (⌃⌘F pour sortir, ⌃⌥G libère la souris)
+make run-window     # idem, mais fenêtré (pratique pour déboguer)
+make run-headless   # sans affichage, traces de boot sur le port série
 ```
 
 > Le `Makefile` retrouve `cargo`/`rustc` via `rustup` même si le paquet
@@ -173,11 +174,11 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
   instances globales uniques, protégées par un mutex (`spin::Mutex`) —
   nécessaire dès qu'un gestionnaire d'interruption peut vouloir écrire à
   l'écran en même temps que le code "normal".
-- ✅ Mode graphique (`src/fb.rs`) : **640×480**, 256 couleurs (palette
+- ✅ Mode graphique (`src/fb.rs`) : **1920×1080**, 256 couleurs (palette
   DAC), via l'interface Bochs VBE de QEMU. L'adresse du framebuffer
   linéaire est lue dans le BAR0 PCI de la carte VGA ; `boot.asm`
   identity-mappe aussi le 4ᵉ GiB (0xC0000000..) pour l'atteindre.
-  Double-buffer.
+  Back-buffer, repeint incrémental (barre latérale mise en cache).
 - ✅ Base de temps (`src/time.rs`) : calibration du TSC contre le canal 2
   du PIT (sans interruptions), pour un `now_secs()` flottant.
 - ✅ **Asti** (`src/asti.rs`) : portage direct du moteur de PC Pet
@@ -189,8 +190,10 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
 - ✅ Souris PS/2 (`src/mouse.rs`) : en polling, curseur flèche.
 - ✅ Police (`src/font.rs`) : récupérée du plan 2 de la VRAM (celle du
   BIOS) puis redessinée pixel par pixel.
-- ✅ Bureau (`src/home.rs`) : plein écran, fond + barre de titre +
-  curseur. Asti est **toujours visible** en haut à droite.
+- ✅ Bureau (`src/home.rs`) : fond noir, barre latérale (tâches à faire
+  en haut, résumé mail/agenda/système + horloge CMOS `src/rtc.rs` en
+  bas), curseur. Asti est **toujours visible** en haut à droite.
+  `make run` lance QEMU en plein écran (`-full-screen`).
 - ✅ Étagère de friandises (`src/shelf.rs`) : 9 friandises dessinées en
   points (motifs de `treats.html`). **Cachée** par défaut ; se déplie
   quand la souris passe sur Asti (ou sur l'étagère), se replie sinon
