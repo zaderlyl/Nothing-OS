@@ -300,6 +300,11 @@ pub fn on_click(mx: i32, my: i32) -> bool {
     }
 }
 
+/// Au-delà, on n'ouvre même pas le fichier (garde-fou mémoire).
+const MAX_OPEN: usize = 24 * 1024 * 1024;
+const MSG_BIG: &str = "fichier trop volumineux pour etre ouvert";
+const MSG_NOPE: &str = "affichage non pris en compte";
+
 fn load_content() {
     unsafe {
         let e = &ENTRIES[SEL as usize];
@@ -310,8 +315,27 @@ fn load_content() {
         IMG_PX = Vec::new();
         VIEW_MSG = String::new();
 
+        let msg = |m: &str| {
+            VIEW_MSG = String::from(m);
+            VIEW = View::Message;
+        };
+
+        // 1) garde-fou taille (fichiers hôte ; les fichiers RAM sont <= FCAP)
+        if host {
+            if let Some(sz) = p9::size(&full_path(&name)) {
+                if sz as usize > MAX_OPEN {
+                    crate::serial_println!("[doc] {} : {} o -> trop gros", name, sz);
+                    return msg(MSG_BIG);
+                }
+            }
+        }
+
+        // 2) lecture (plafonnée : sécurité si getattr a menti / fs local)
         let full = if host {
-            p9::read_file(&full_path(&name)).unwrap_or_default()
+            match p9::read_file_max(&full_path(&name), MAX_OPEN) {
+                Some(d) => d,
+                None => return msg(MSG_BIG),
+            }
         } else {
             match fs::find(name.as_bytes()) {
                 Some(i) => fs::get(i).map(|f| f.data[..f.len].to_vec()).unwrap_or_default(),
@@ -319,49 +343,66 @@ fn load_content() {
             }
         };
 
-        match crate::image::kind_of(&name) {
-            Some(kind) => {
-                let max_w = PW - 2 * PADX;
-                let max_h = H - HEADER_H - 24;
-                match crate::image::decode_fit(&full, kind, max_w, max_h) {
-                    Ok(bm) => {
-                        IMG_W = bm.w;
-                        IMG_H = bm.h;
-                        IMG_PX = bm.px;
-                        VIEW = View::Image;
-                        crate::serial_println!("[doc] image {} : {}x{}", name, bm.w, bm.h);
-                    }
-                    Err(msg) => {
-                        VIEW_MSG = String::from(msg);
-                        VIEW = View::Message;
-                        crate::serial_println!("[doc] image {} : {}", name, msg);
-                    }
+        // 3) selon le type
+        if let Some(kind) = crate::image::kind_of(&name) {
+            let max_w = PW - 2 * PADX;
+            let max_h = H - HEADER_H - 24;
+            match crate::image::decode_fit(&full, kind, max_w, max_h) {
+                Ok(bm) => {
+                    IMG_W = bm.w;
+                    IMG_H = bm.h;
+                    IMG_PX = bm.px;
+                    VIEW = View::Image;
+                    crate::serial_println!("[doc] image {} : {}x{}", name, bm.w, bm.h);
                 }
+                Err(e) if e.contains("trop grande") => msg(MSG_BIG),
+                Err(_) => msg(MSG_NOPE),
             }
-            None if is_svg(&name) => {
-                VIEW_MSG = String::from("SVG : rendu non disponible (source ci-dessous)");
-                let mut d = full;
-                d.truncate(32 * 1024);
-                CONTENT = d;
-                VIEW = View::Text;
-            }
-            None => {
-                let mut d = full;
-                d.truncate(32 * 1024);
-                CONTENT = d;
-                VIEW = View::Text;
-                crate::serial_println!("[doc] ouvre {} ({} o)", name, CONTENT.len());
-            }
+        } else if ext_unsupported(&name) || looks_binary(&full) {
+            crate::serial_println!("[doc] {} : non affichable", name);
+            msg(MSG_NOPE);
+        } else {
+            let mut d = full;
+            d.truncate(32 * 1024);
+            CONTENT = d;
+            VIEW = View::Text;
+            crate::serial_println!("[doc] ouvre {} ({} o)", name, CONTENT.len());
         }
     }
 }
 
-fn is_svg(name: &str) -> bool {
+/// Extensions dont on sait qu'on ne sait pas les afficher.
+fn ext_unsupported(name: &str) -> bool {
     let e = match name.rsplit('.').next() {
         Some(e) => e,
         None => return false,
     };
-    e.len() == 3 && e.bytes().zip(b"svg").all(|(c, &d)| c.to_ascii_lowercase() == d)
+    const LIST: &[&str] = &[
+        "svg", "pdf", "gif", "webp", "heic", "heif", "tiff", "tif", "bmp", "ico", "psd", "ai",
+        "zip", "gz", "tar", "7z", "rar", "dmg", "iso", "mp3", "wav", "flac", "aac", "ogg", "m4a",
+        "mp4", "mov", "avi", "mkv", "webm", "m4v", "docx", "xlsx", "pptx", "doc", "xls", "ppt",
+        "key", "numbers", "pages", "sqlite", "db", "bin", "exe", "dll", "so", "dylib", "o", "a",
+        "class", "jar", "ttf", "otf", "woff", "woff2",
+    ];
+    LIST.iter()
+        .any(|t| e.len() == t.len() && e.bytes().zip(t.bytes()).all(|(c, d)| c.to_ascii_lowercase() == d))
+}
+
+/// Le contenu ressemble-t-il à du binaire (donc illisible en texte) ?
+fn looks_binary(d: &[u8]) -> bool {
+    let n = d.len().min(8192);
+    if n == 0 {
+        return false;
+    }
+    let mut bad = 0usize;
+    for &b in &d[..n] {
+        match b {
+            0 => return true,                                  // NUL -> binaire
+            0x09 | 0x0a | 0x0d | 0x20..=0x7e | 0x80..=0xff => {} // texte / UTF-8
+            _ => bad += 1,                                      // autres contrôles
+        }
+    }
+    bad * 100 / n > 10
 }
 
 // --- rendu -------------------------------------------------------------
@@ -515,19 +556,14 @@ fn draw_right(rx: i32) {
         View::Message => {
             let msg = unsafe { &VIEW_MSG };
             let w = font::width_scaled(msg, 2);
-            font::draw_str_scaled(rx + (PW - w) / 2, H / 2 - 16, msg, P_DIM, 2);
+            font::draw_str_scaled(rx + (PW - w) / 2, H / 2 - 10, msg, P_DIM, 2);
+            dots::draw_centered(dots::QUESTION, rx, H / 2 + 40, PW, 80, 6, P_DIM, P_TITLE_HI);
         }
         View::Text => {
             let cols = ((PW - 2 * PADX) / 16).max(1) as usize;
             let mut x = rx + PADX;
             let mut y = HEADER_H + 6 - unsafe { R_SCROLL };
             let mut c = 0usize;
-            // bandeau "source SVG" éventuel
-            let svg_note = unsafe { !VIEW_MSG.is_empty() && is_svg(&CONTENT_NAME) };
-            if svg_note {
-                font::draw_str_scaled(rx + PADX, y, unsafe { &VIEW_MSG }, P_ACCENT, 1);
-                y += 22;
-            }
             for &b in unsafe { &CONTENT } {
                 if b == b'\n' {
                     y += 22;

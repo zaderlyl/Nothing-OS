@@ -24,8 +24,13 @@ const T_LOPEN: u8 = 12;
 const R_LOPEN: u8 = 13;
 const T_LCREATE: u8 = 14;
 const R_LCREATE: u8 = 15;
+const T_GETATTR: u8 = 24;
+const R_GETATTR: u8 = 25;
 const T_READDIR: u8 = 40;
 const R_READDIR: u8 = 41;
+
+/// `request_mask` de Tgetattr : on ne veut que la taille (bit `SIZE`).
+const GETATTR_SIZE: u64 = 0x0000_0200;
 const T_VERSION: u8 = 100;
 const R_VERSION: u8 = 101;
 const T_ATTACH: u8 = 104;
@@ -344,8 +349,32 @@ pub fn list(path: &str) -> Option<Vec<Ent>> {
     Some(ents)
 }
 
+/// Taille en octets du fichier `path` (Tgetattr), `None` si absent.
+pub fn size(path: &str) -> Option<u64> {
+    if !present() {
+        return None;
+    }
+    let fid = walk(path)?;
+    let mut m = Msg::new(T_GETATTR);
+    m.p32(fid);
+    m.p64(GETATTR_SIZE);
+    let body = m.call(R_GETATTR);
+    clunk(fid);
+    let body = body?;
+    // corps : valid[8] qid[13] mode[4] uid[4] gid[4] nlink[8] rdev[8] size[8] ...
+    let mut rd = Rd::new(&body);
+    rd.skip(8 + 13 + 4 + 4 + 4 + 8 + 8);
+    Some(rd.g64())
+}
+
 /// Lit tout le contenu du fichier `path`.
 pub fn read_file(path: &str) -> Option<Vec<u8>> {
+    read_file_max(path, usize::MAX)
+}
+
+/// Comme [`read_file`], mais abandonne (renvoie `None`) si le fichier
+/// dépasse `max` octets — garde-fou anti-OOM.
+pub fn read_file_max(path: &str, max: usize) -> Option<Vec<u8>> {
     if !present() {
         return None;
     }
@@ -379,6 +408,10 @@ pub fn read_file(path: &str) -> Option<Vec<u8>> {
         let take = cnt.min(data.len());
         out.extend_from_slice(&data[..take]);
         off += take as u64;
+        if out.len() > max {
+            clunk(fid);
+            return None;
+        }
         if take < CHUNK {
             break;
         }
