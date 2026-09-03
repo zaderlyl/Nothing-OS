@@ -250,7 +250,7 @@ pub fn run(mut brain: asti::Brain) -> ! {
                 if over_asti {
                     shelf::consume(kind, now);
                     feed(kind.boost());
-                    brain.react_feed(now);
+                    brain.react_feed(kind, now);
                 } else {
                     shelf::restore(kind);
                 }
