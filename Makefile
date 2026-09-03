@@ -45,7 +45,7 @@ ISO        := nothing-os.iso
 
 QEMU_FLAGS := -no-reboot -no-shutdown
 
-.PHONY: all kernel iso run run-window run-headless run-iso clean
+.PHONY: all kernel iso run run-fs run-headless run-iso clean
 
 all: $(KERNEL_BIN)
 
@@ -76,14 +76,15 @@ $(KERNEL_MB): kernel $(BUILD_DIR)/boot-mb.o $(BUILD_DIR)/long_mode.o $(LINKER)
 		$(KERNEL_LIB)
 
 # --- Lancement direct (PVH, sans GRUB) -------------------------------
-# `-full-screen` : la fenêtre QEMU occupe tout l'écran (⌃⌘F pour sortir,
-#  ⌥⌘G pour libérer la souris sur macOS).
+# La souris PS/2 est *relative* : QEMU ne l'envoie au noyau que quand le
+# pointeur est "capturé" → clique une fois dans la fenêtre. ⌃⌥G le
+# relâche (macOS). En fenêtré c'est plus simple à gérer qu'en plein
+# écran, d'où le défaut ci-dessous ; `make run-fs` pour le plein écran.
 run: $(KERNEL_BIN)
-	$(QEMU) -kernel $(KERNEL_BIN) -vga std -full-screen -serial stdio $(QEMU_FLAGS)
-
-# fenêtré (utile pour déboguer)
-run-window: $(KERNEL_BIN)
 	$(QEMU) -kernel $(KERNEL_BIN) -vga std -serial stdio $(QEMU_FLAGS)
+
+run-fs: $(KERNEL_BIN)
+	$(QEMU) -kernel $(KERNEL_BIN) -vga std -full-screen -serial stdio $(QEMU_FLAGS)
 
 run-headless: $(KERNEL_BIN)
 	$(QEMU) -kernel $(KERNEL_BIN) -display none -serial stdio $(QEMU_FLAGS)

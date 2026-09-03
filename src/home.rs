@@ -175,6 +175,7 @@ pub fn run(mut brain: asti::Brain) -> ! {
     let mut side_leave = -10.0_f32;
     let mut last = time::now_secs();
     let mut click_latch = false;
+    let mut diag_t = last;
 
     loop {
         let now = time::now_secs();
@@ -183,6 +184,19 @@ pub fn run(mut brain: asti::Brain) -> ! {
 
         mouse::poll();
         let m = mouse::state();
+
+        // diagnostic souris : si x/y ne bougent jamais quand tu bouges la
+        // souris, c'est que QEMU ne "capture" pas le pointeur → clique
+        // dans la fenêtre (⌃⌥G pour relâcher).
+        if now - diag_t >= 3.0 {
+            diag_t = now;
+            crate::serial_println!(
+                "[nothing-os] souris x={} y={} paquets={}",
+                m.x,
+                m.y,
+                mouse::packets()
+            );
+        }
 
         // --- étagère : suit le survol d'Asti ---
         let (dcx, dcy) = asti::disc_center(asti::HOME_OX);
