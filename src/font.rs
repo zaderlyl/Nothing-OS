@@ -92,6 +92,32 @@ pub fn draw_str_scaled(x: i32, y: i32, s: &str, fg: u8, scale: i32) {
     }
 }
 
+/// Largeur en pixels d'une chaîne à l'échelle `scale`.
+pub fn width_scaled(s: &str, scale: i32) -> i32 {
+    s.len() as i32 * 8 * scale
+}
+
+/// Chaîne rendue en **points** (façon matrice de LED) : chaque pixel du
+/// glyphe devient un petit disque, avec de l'espace autour. `cell` est le
+/// pas entre points.
+pub fn draw_str_dots(x: i32, y: i32, s: &str, fg: u8, cell: i32) {
+    let r = (cell as f32) * 0.34;
+    let mut cx = x;
+    for &b in s.as_bytes() {
+        let glyph = unsafe { &FONT[b as usize] };
+        for (row, bits) in glyph.iter().enumerate() {
+            for col in 0..8i32 {
+                if bits & (0x80 >> col) != 0 {
+                    let px = (cx + col * cell + cell / 2) as f32;
+                    let py = (y + row as i32 * cell + cell / 2) as f32;
+                    fb::fill_circle(px, py, r, fg);
+                }
+            }
+        }
+        cx += 8 * cell;
+    }
+}
+
 /// Dessine une chaîne ASCII, avance de 8 px par caractère.
 pub fn draw_str(x: i32, y: i32, s: &str, fg: u8, bg: Option<u8>) {
     let mut cx = x;
