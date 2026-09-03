@@ -53,22 +53,27 @@ pub fn pop_char() -> u8 {
     }
 }
 
-/// Table scancode (jeu 1, 0x02..0x35) → ASCII, sans / avec Maj.
+/// Table scancode (jeu 1) → ASCII pour un clavier **AZERTY** (français),
+/// sans / avec Maj. Les lettres accentuées sont repliées sur leur base
+/// (é→e, ç→c...) puisqu'on ne fait pas d'Unicode. Le `/` des commandes
+/// s'obtient avec **Maj + `:`** (ou le `/` du pavé numérique).
 const MAP: [(u8, u8, u8); 47] = [
-    (0x02, b'1', b'!'),
-    (0x03, b'2', b'@'),
-    (0x04, b'3', b'#'),
-    (0x05, b'4', b'$'),
-    (0x06, b'5', b'%'),
-    (0x07, b'6', b'^'),
-    (0x08, b'7', b'&'),
-    (0x09, b'8', b'*'),
-    (0x0a, b'9', b'('),
-    (0x0b, b'0', b')'),
-    (0x0c, b'-', b'_'),
+    // rangée des chiffres : & é " ' ( - è _ ç à ) =  /  1 2 3 4 5 6 7 8 9 0 ° +
+    (0x02, b'&', b'1'),
+    (0x03, b'e', b'2'),
+    (0x04, b'"', b'3'),
+    (0x05, b'\'', b'4'),
+    (0x06, b'(', b'5'),
+    (0x07, b'-', b'6'),
+    (0x08, b'e', b'7'),
+    (0x09, b'_', b'8'),
+    (0x0a, b'c', b'9'),
+    (0x0b, b'a', b'0'),
+    (0x0c, b')', b')'),
     (0x0d, b'=', b'+'),
-    (0x10, b'q', b'Q'),
-    (0x11, b'w', b'W'),
+    // a z e r t y u i o p ^ $
+    (0x10, b'a', b'A'),
+    (0x11, b'z', b'Z'),
     (0x12, b'e', b'E'),
     (0x13, b'r', b'R'),
     (0x14, b't', b'T'),
@@ -77,9 +82,10 @@ const MAP: [(u8, u8, u8); 47] = [
     (0x17, b'i', b'I'),
     (0x18, b'o', b'O'),
     (0x19, b'p', b'P'),
-    (0x1a, b'[', b'{'),
-    (0x1b, b']', b'}'),
-    (0x1e, b'a', b'A'),
+    (0x1a, b'^', b'^'),
+    (0x1b, b'$', b'*'),
+    // q s d f g h j k l m u *
+    (0x1e, b'q', b'Q'),
     (0x1f, b's', b'S'),
     (0x20, b'd', b'D'),
     (0x21, b'f', b'F'),
@@ -88,20 +94,21 @@ const MAP: [(u8, u8, u8); 47] = [
     (0x24, b'j', b'J'),
     (0x25, b'k', b'K'),
     (0x26, b'l', b'L'),
-    (0x27, b';', b':'),
-    (0x28, b'\'', b'"'),
-    (0x2b, b'\\', b'|'),
-    (0x2c, b'z', b'Z'),
+    (0x27, b'm', b'M'),
+    (0x28, b'u', b'%'),
+    (0x2b, b'*', b'u'),
+    // < w x c v b n , ; : !
+    (0x56, b'<', b'>'),
+    (0x2c, b'w', b'W'),
     (0x2d, b'x', b'X'),
     (0x2e, b'c', b'C'),
     (0x2f, b'v', b'V'),
     (0x30, b'b', b'B'),
     (0x31, b'n', b'N'),
-    (0x32, b'm', b'M'),
-    (0x33, b',', b'<'),
-    (0x34, b'.', b'>'),
-    (0x35, b'/', b'?'),
-    (0x29, b'/', b'/'), // touche `²`/backtick sur clavier FR — on la traite comme "/"
+    (0x32, b',', b'?'),
+    (0x33, b';', b'.'),
+    (0x34, b':', b'/'),
+    (0x35, b'!', b'!'),
 ];
 
 /// Transmet un octet reçu du contrôleur 8042 (port clavier).
@@ -142,7 +149,16 @@ pub fn feed(byte: u8) {
             _ => {}
         }
 
-        if !down || ext {
+        if !down {
+            return;
+        }
+        if ext {
+            // pavé numérique : Entrée et division
+            match code {
+                0x1c => push_char(b'\n'),
+                0x35 => push_char(b'/'),
+                _ => {}
+            }
             return;
         }
 
