@@ -8,3 +8,4 @@
 *.ppm
 /*.png
 !docs/*.png
+/nothingos.img

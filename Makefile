@@ -42,8 +42,12 @@ LINKER     := $(BOOT_DIR)/linker.ld
 KERNEL_BIN := kernel.bin
 KERNEL_MB  := kernel-mb.bin
 ISO        := nothing-os.iso
+DISK       := nothingos.img
 
 QEMU_FLAGS := -no-reboot -no-shutdown
+# disque persistant : image raw de 16 Mio sur le Mac, vue comme un vrai
+# disque dur par le noyau (canal IDE primaire).
+QEMU_DISK  := -drive file=$(DISK),format=raw,if=ide,index=0
 
 .PHONY: all kernel iso run run-fs run-headless run-iso clean
 
@@ -51,6 +55,11 @@ all: $(KERNEL_BIN)
 
 kernel:
 	$(CARGO_ENV) $(CARGO) build --release --target $(TARGET)
+
+# disque persistant : créé une fois s'il n'existe pas
+$(DISK):
+	@echo "creation du disque $(DISK) (16 Mio)"
+	@dd if=/dev/zero of=$(DISK) bs=1m count=16 2>/dev/null
 
 $(BUILD_DIR)/long_mode.o: $(BOOT_DIR)/long_mode.asm
 	@mkdir -p $(BUILD_DIR)
@@ -80,11 +89,11 @@ $(KERNEL_MB): kernel $(BUILD_DIR)/boot-mb.o $(BUILD_DIR)/long_mode.o $(LINKER)
 # pointeur est "capturé" → clique une fois dans la fenêtre. ⌃⌥G le
 # relâche (macOS). En fenêtré c'est plus simple à gérer qu'en plein
 # écran, d'où le défaut ci-dessous ; `make run-fs` pour le plein écran.
-run: $(KERNEL_BIN)
-	$(QEMU) -kernel $(KERNEL_BIN) -vga std -serial stdio $(QEMU_FLAGS)
+run: $(KERNEL_BIN) $(DISK)
+	$(QEMU) -kernel $(KERNEL_BIN) -vga std $(QEMU_DISK) -serial stdio $(QEMU_FLAGS)
 
-run-fs: $(KERNEL_BIN)
-	$(QEMU) -kernel $(KERNEL_BIN) -vga std -full-screen -serial stdio $(QEMU_FLAGS)
+run-fs: $(KERNEL_BIN) $(DISK)
+	$(QEMU) -kernel $(KERNEL_BIN) -vga std -full-screen $(QEMU_DISK) -serial stdio $(QEMU_FLAGS)
 
 run-headless: $(KERNEL_BIN)
 	$(QEMU) -kernel $(KERNEL_BIN) -display none -serial stdio $(QEMU_FLAGS)

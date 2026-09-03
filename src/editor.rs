@@ -64,6 +64,7 @@ fn insert(win: usize, c: u8) {
     f.data[cur] = c;
     f.len += 1;
     ed.cur = cur + 1;
+    fs::mark_dirty();
 }
 
 fn del_back(win: usize) {
@@ -78,6 +79,7 @@ fn del_back(win: usize) {
     }
     f.len -= 1;
     ed.cur = cur - 1;
+    fs::mark_dirty();
 }
 
 fn line_col(data: &[u8], cur: usize) -> (usize, usize) {

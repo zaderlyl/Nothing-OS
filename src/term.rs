@@ -98,6 +98,7 @@ fn run(line: &[u8]) {
             out(b"date         heure courante");
             out(b"feed         nourrit Asti (+10)");
             out(b"hunger       niveau de faim d'Asti");
+            out(b"sync         enregistre sur le disque");
             out(b"clear        efface l'ecran");
         }
         b"ls" => {
@@ -162,6 +163,7 @@ fn run(line: &[u8]) {
                 let n = txt.len().min(fs::FCAP);
                 f.data[..n].copy_from_slice(&txt[..n]);
                 f.len = n;
+                fs::mark_dirty();
                 out(b"ok");
             } else {
                 out(b"write: impossible");
@@ -188,6 +190,11 @@ fn run(line: &[u8]) {
             let mut d = [0u8; 4];
             let n = utoa(home::food() as u32, &mut d);
             out2(b"faim: ", &d[..n]);
+        }
+        b"sync" => {
+            fs::mark_dirty();
+            fs::flush();
+            out(b"ecrit sur le disque");
         }
         b"clear" => unsafe {
             HEAD = 0;

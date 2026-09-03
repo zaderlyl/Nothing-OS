@@ -16,6 +16,7 @@
 #![feature(abi_x86_interrupt)]
 
 mod asti;
+mod ata;
 mod editor;
 mod fb;
 mod font;
@@ -144,6 +145,7 @@ pub extern "C" fn rust_main() -> ! {
 
     font::capture(); // encore en mode texte : on récupère la police du BIOS
     fs::init();
+    fs::load(); // remplace les fichiers par défaut si le disque a une image
     fb::init();
     asti::install_palette(asti::Tint::Null);
     home::install_palette();

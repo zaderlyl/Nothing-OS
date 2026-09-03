@@ -282,15 +282,23 @@ pub fn run(mut brain: asti::Brain) -> ! {
     let mut last = time::now_secs();
     let mut click_latch = false;
     let mut drag: Option<shelf::Kind> = None; // friandise en cours de glissement
+    let mut sync_t = last;
 
     loop {
-        // --- raccourci de fermeture : Maj + Tab + Cmd ---
+        // --- raccourci de fermeture : Maj + Tab + Cmd (enregistre avant) ---
         if crate::kbd::close_combo() {
             crate::serial_println!("[nothing-os] fermeture (Maj+Tab+Cmd)");
+            crate::fs::flush();
             crate::kbd::power_off();
         }
 
         let now = time::now_secs();
+
+        // enregistrement disque périodique (si des fichiers ont changé)
+        if now - sync_t >= 2.0 {
+            sync_t = now;
+            crate::fs::flush();
+        }
         let dt = (now - last).clamp(0.0, 0.1);
         last = now;
 

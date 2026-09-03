@@ -1,8 +1,11 @@
 #![allow(dead_code, static_mut_refs)]
-//! Système de fichiers en RAM (pas de disque pour l'instant, donc tout
-//! est perdu au redémarrage). Emplacements de taille fixe, aucun
-//! allocateur : c'est un noyau jouet, on préfère la simplicité et la
-//! robustesse.
+//! Système de fichiers : emplacements de taille fixe en RAM, aucun
+//! allocateur. Rendu **persistant** en le sérialisant tel quel sur le
+//! disque ATA (`nothingos.img` côté Mac) — voir [`save`] / [`load`].
+
+use core::mem::size_of;
+
+use crate::ata;
 
 const MAXF: usize = 24;
 /// Taille maxi d'un fichier.
@@ -134,6 +137,7 @@ pub fn create_kind(name: &[u8], dir: bool) -> Option<usize> {
                 f.used = true;
                 f.dir = dir;
                 set_name(f, name);
+                mark_dirty();
                 return Some(i);
             }
         }
@@ -146,8 +150,87 @@ pub fn remove(name: &[u8]) -> bool {
         unsafe {
             FILES[i].used = false;
         }
+        mark_dirty();
         true
     } else {
         false
+    }
+}
+
+// ---------------------------------------------------------------------
+// Persistance sur disque ATA.
+// ---------------------------------------------------------------------
+
+const MAGIC: [u8; 8] = *b"NOS-FS01";
+const IMG_BYTES: usize = size_of::<[File; MAXF]>();
+const IMG_SECTORS: usize = (IMG_BYTES + ata::SECTOR - 1) / ata::SECTOR;
+
+static mut DISK: [u8; IMG_SECTORS * ata::SECTOR] = [0; IMG_SECTORS * ata::SECTOR];
+static mut DIRTY: bool = false;
+static mut HAS_DISK: bool = false;
+
+fn rw(write: bool) -> bool {
+    let buf = unsafe { &mut DISK[..] };
+    let mut done = 0usize;
+    while done < IMG_SECTORS {
+        let n = (IMG_SECTORS - done).min(63) as u8;
+        let seg = &mut buf[done * ata::SECTOR..(done + n as usize) * ata::SECTOR];
+        let lba = 1 + done as u32;
+        let ok = if write {
+            ata::write(lba, n, seg)
+        } else {
+            ata::read(lba, n, seg)
+        };
+        if !ok {
+            return false;
+        }
+        done += n as usize;
+    }
+    true
+}
+
+/// Charge le système de fichiers depuis le disque. Si pas de disque ou
+/// disque vierge, on garde les fichiers par défaut (créés par `init`).
+pub fn load() {
+    if !ata::present() {
+        return;
+    }
+    unsafe {
+        HAS_DISK = true;
+    }
+    let mut hdr = [0u8; ata::SECTOR];
+    if !ata::read(0, 1, &mut hdr) || hdr[..8] != MAGIC {
+        crate::serial_println!("[nothing-os] disque non formate : fichiers par defaut");
+        return;
+    }
+    if rw(false) {
+        unsafe {
+            let src = &DISK as *const u8;
+            core::ptr::copy_nonoverlapping(src, &raw mut FILES as *mut u8, IMG_BYTES);
+        }
+        crate::serial_println!("[nothing-os] {} fichiers charges du disque", count());
+    }
+}
+
+pub fn mark_dirty() {
+    unsafe {
+        DIRTY = true;
+    }
+}
+
+/// Écrit le système de fichiers sur le disque s'il a changé.
+pub fn flush() {
+    unsafe {
+        if !DIRTY || !HAS_DISK {
+            return;
+        }
+        DIRTY = false;
+        let mut hdr = [0u8; ata::SECTOR];
+        hdr[..8].copy_from_slice(&MAGIC);
+        ata::write(0, 1, &hdr);
+        core::ptr::copy_nonoverlapping(&raw const FILES as *const u8, &raw mut DISK as *mut u8, IMG_BYTES);
+    }
+    if rw(true) {
+        crate::serial_println!("[nothing-os] disque synchronise");
     }
 }
