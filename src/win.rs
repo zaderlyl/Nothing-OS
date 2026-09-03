@@ -1,52 +1,48 @@
-//! Mini gestionnaire de fenêtres. Pas de vrai système de processus ni de
-//! fichiers : chaque fenêtre est une *maquette* de l'application demandée
-//! (éditeur, chat, navigateur, gestionnaire de fichiers...). Ça suffit
-//! pour l'usage « je tape une commande, une fenêtre s'ouvre ».
+//! Gestionnaire de fenêtres. Les applications sont **réelles** : éditeur
+//! de texte (agit sur [`crate::fs`]), terminal (mini shell), gestionnaire
+//! de fichiers, recherche locale, PC Pet Hub, calculatrice.
+//!
+//! Il n'y a pas de disque : tout vit en RAM et disparaît au redémarrage.
 
-use crate::{fb, font};
+use crate::{editor, fb, font, fs, term};
 
 const MAX: usize = 6;
 const TITLE_H: i32 = 30;
 
-// --- palette fenêtres (indices 64..=90) ---
-const P_FRAME: u8 = 64;
-const P_TITLE: u8 = 65;
-const P_TITLE_HI: u8 = 66;
-const P_BODY: u8 = 67;
-const P_TEXT: u8 = 68;
-const P_DIM: u8 = 69;
-const P_ACCENT: u8 = 70;
-const P_CODE_BG: u8 = 71;
-const P_CODE_KW: u8 = 72;
-const P_CODE_STR: u8 = 73;
-const P_CODE_FN: u8 = 74;
-const P_CLOSE: u8 = 75;
+// palette fenêtres (indices 64..=90)
+pub const P_FRAME: u8 = 64;
+pub const P_TITLE: u8 = 65;
+pub const P_TITLE_HI: u8 = 66;
+pub const P_BODY: u8 = 67;
+pub const P_TEXT: u8 = 68;
+pub const P_DIM: u8 = 69;
+pub const P_ACCENT: u8 = 70;
+pub const P_CODE_BG: u8 = 71;
+const P_STR: u8 = 73;
+pub const P_CLOSE: u8 = 75;
 
 pub fn install_palette() {
-    fb::set_palette(P_FRAME, 60, 64, 82);
+    fb::set_palette(P_FRAME, 64, 68, 88);
     fb::set_palette(P_TITLE, 30, 33, 44);
-    fb::set_palette(P_TITLE_HI, 46, 50, 66);
-    fb::set_palette(P_BODY, 22, 24, 32);
-    fb::set_palette(P_TEXT, 216, 222, 236);
-    fb::set_palette(P_DIM, 120, 126, 146);
+    fb::set_palette(P_TITLE_HI, 48, 52, 70);
+    fb::set_palette(P_BODY, 24, 26, 34);
+    fb::set_palette(P_TEXT, 220, 226, 240);
+    fb::set_palette(P_DIM, 122, 128, 148);
     fb::set_palette(P_ACCENT, 120, 200, 255);
-    fb::set_palette(P_CODE_BG, 18, 20, 28);
-    fb::set_palette(P_CODE_KW, 150, 130, 240);
-    fb::set_palette(P_CODE_STR, 140, 210, 140);
-    fb::set_palette(P_CODE_FN, 240, 200, 120);
-    fb::set_palette(P_CLOSE, 230, 90, 90);
+    fb::set_palette(P_CODE_BG, 16, 18, 26);
+    fb::set_palette(P_STR, 150, 210, 150);
+    fb::set_palette(P_CLOSE, 224, 92, 92);
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum App {
-    Generic,
-    Code,
-    Chat,
-    Git,
-    Web,
+    Editor,
+    Terminal,
     Files,
-    FileView,
+    Web,
     Hub,
+    Calc,
+    Unknown,
 }
 
 #[derive(Clone, Copy)]
@@ -56,25 +52,25 @@ struct Win {
     tlen: usize,
     arg: [u8; 96],
     alen: usize,
+    slot: usize, // éditeur : index du fichier fs
     x: i32,
     y: i32,
     w: i32,
     h: i32,
-    open: bool,
 }
 
 impl Win {
     const EMPTY: Win = Win {
-        app: App::Generic,
+        app: App::Unknown,
         title: [0; 40],
         tlen: 0,
         arg: [0; 96],
         alen: 0,
+        slot: 0,
         x: 0,
         y: 0,
         w: 0,
         h: 0,
-        open: false,
     };
     fn title(&self) -> &str {
         core::str::from_utf8(&self.title[..self.tlen]).unwrap_or("?")
@@ -84,18 +80,19 @@ impl Win {
     }
 }
 
-fn copy_into(dst: &mut [u8], src: &[u8]) -> usize {
+fn cp(dst: &mut [u8], src: &[u8]) -> usize {
     let n = src.len().min(dst.len());
     dst[..n].copy_from_slice(&src[..n]);
     n
 }
 
 pub struct Manager {
-    /// De bas en haut : `wins[order[0]]` derrière, `wins[order[n-1]]` devant.
     wins: [Win; MAX],
     order: [usize; MAX],
     n: usize,
-    drag: Option<(usize, i32, i32)>, // (slot dans `order`, dx, dy souris→fenêtre)
+    drag: Option<(usize, i32, i32)>,
+    /// le focus clavier est-il sur une fenêtre (sinon : barre de commande) ?
+    kb_on_win: bool,
     spawn_i: i32,
 }
 
@@ -106,57 +103,71 @@ impl Manager {
             order: [0, 1, 2, 3, 4, 5],
             n: 0,
             drag: None,
+            kb_on_win: false,
             spawn_i: 0,
         }
     }
 
-    /// Ouvre une fenêtre (remplace la plus ancienne si plein).
-    pub fn spawn(&mut self, app: App, title: &[u8], arg: &[u8]) {
-        let slot = if self.n < MAX {
+    fn alloc_slot(&mut self) -> usize {
+        if self.n < MAX {
             let s = self.n;
             self.order[self.n] = s;
             self.n += 1;
             s
         } else {
-            // réutilise le slot de la fenêtre du fond
             let s = self.order[0];
             for k in 0..MAX - 1 {
                 self.order[k] = self.order[k + 1];
             }
             self.order[MAX - 1] = s;
             s
-        };
-        let w = &mut self.wins[slot];
+        }
+    }
+
+    pub fn spawn(&mut self, app: App, title: &[u8], arg: &[u8]) {
+        let s = self.alloc_slot();
+        let w = &mut self.wins[s];
         *w = Win::EMPTY;
         w.app = app;
-        w.tlen = copy_into(&mut w.title, title);
-        w.alen = copy_into(&mut w.arg, arg);
-        w.open = true;
+        w.tlen = cp(&mut w.title, title);
+        w.alen = cp(&mut w.arg, arg);
+
+        match app {
+            App::Editor => {
+                // ouvre le fichier `arg` (ou en crée un "sans-titre")
+                let name: &[u8] = if arg.is_empty() {
+                    b"sans-titre.txt"
+                } else {
+                    arg
+                };
+                let fslot = fs::create(name).unwrap_or(0);
+                w.slot = fslot;
+                w.tlen = cp(&mut w.title, name);
+                editor::attach(s, fslot);
+            }
+            App::Terminal => term::reset(),
+            _ => {}
+        }
+
         let (ww, wh) = match app {
             App::Hub => (620, 520),
-            App::Web => (1100, 720),
-            App::Code => (1180, 760),
-            _ => (960, 620),
+            App::Calc => (360, 460),
+            App::Web => (1000, 700),
+            App::Terminal => (1000, 640),
+            App::Editor => (1080, 720),
+            _ => (900, 600),
         };
-        let off = (self.spawn_i % 5) * 44;
-        w.x = (fb::WIDTH as i32 - ww) / 2 - 120 + off;
-        w.y = (fb::HEIGHT as i32 - wh) / 2 - 40 + off;
+        let off = (self.spawn_i % 5) * 40;
+        w.x = ((fb::WIDTH as i32 - ww) / 2 - 100 + off).max(20);
+        w.y = ((fb::HEIGHT as i32 - wh) / 2 - 30 + off).max(10);
         w.w = ww;
         w.h = wh;
         self.spawn_i += 1;
-        self.focus_slot(self.top_index_of(slot));
+        self.focus(self.n - 1);
+        self.kb_on_win = matches!(app, App::Editor | App::Terminal | App::Calc);
     }
 
-    fn top_index_of(&self, slot: usize) -> usize {
-        for i in 0..self.n {
-            if self.order[i] == slot {
-                return i;
-            }
-        }
-        0
-    }
-
-    fn focus_slot(&mut self, i: usize) {
+    fn focus(&mut self, i: usize) {
         if i + 1 >= self.n {
             return;
         }
@@ -167,12 +178,6 @@ impl Manager {
         self.order[self.n - 1] = s;
     }
 
-    #[allow(dead_code)]
-    pub fn any_open(&self) -> bool {
-        self.n > 0
-    }
-
-    /// Application de la fenêtre au premier plan (pour l'humeur d'Asti).
     pub fn focused_app(&self) -> Option<App> {
         if self.n == 0 {
             None
@@ -181,8 +186,35 @@ impl Manager {
         }
     }
 
-    /// Souris : focus au clic, glisser par la barre de titre, bouton fermer.
-    pub fn on_mouse(&mut self, mx: i32, my: i32, down: bool, pressed: bool) {
+    /// Le clavier doit-il aller à la fenêtre (et non à la barre) ?
+    pub fn wants_keys(&self) -> bool {
+        self.kb_on_win
+            && self.n > 0
+            && matches!(
+                self.wins[self.order[self.n - 1]].app,
+                App::Editor | App::Terminal | App::Calc
+            )
+    }
+
+    pub fn feed_key(&mut self, c: u8) {
+        if self.n == 0 {
+            return;
+        }
+        let s = self.order[self.n - 1];
+        match self.wins[s].app {
+            App::Editor => editor::key(s, c),
+            App::Terminal => term::key(c),
+            App::Calc => calc_key(s, c),
+            _ => {}
+        }
+    }
+
+    /// Clic dans la barre de commande : le clavier repart vers elle.
+    pub fn blur(&mut self) {
+        self.kb_on_win = false;
+    }
+
+    pub fn on_mouse(&mut self, mx: i32, my: i32, down: bool, pressed: bool) -> bool {
         if let Some((oi, dx, dy)) = self.drag {
             if down {
                 let s = self.order[oi];
@@ -191,188 +223,252 @@ impl Manager {
             } else {
                 self.drag = None;
             }
-            return;
+            return true;
         }
         if !pressed {
-            return;
+            return false;
         }
-        // du haut vers le bas
         for i in (0..self.n).rev() {
             let s = self.order[i];
             let w = self.wins[s];
             if mx >= w.x && mx < w.x + w.w && my >= w.y && my < w.y + w.h + TITLE_H {
-                // bouton fermer ?
                 let cbx = w.x + w.w - 26;
                 if my < w.y + TITLE_H && mx >= cbx {
-                    // ferme : retire du z-order
                     for k in i..self.n - 1 {
                         self.order[k] = self.order[k + 1];
                     }
                     self.n -= 1;
-                    self.wins[s].open = false;
-                    return;
+                    return true;
                 }
-                self.focus_slot(i);
+                self.focus(i);
+                self.kb_on_win = matches!(
+                    self.wins[s].app,
+                    App::Editor | App::Terminal | App::Calc
+                );
                 if my < w.y + TITLE_H {
-                    let oi = self.n - 1;
-                    self.drag = Some((oi, mx - w.x, my - w.y));
+                    self.drag = Some((self.n - 1, mx - w.x, my - w.y));
                 }
-                return;
+                return true;
             }
         }
+        false
     }
 
     pub fn draw(&self, t: f32) {
         for i in 0..self.n {
-            let w = self.wins[self.order[i]];
+            let s = self.order[i];
+            let w = self.wins[s];
             let focused = i + 1 == self.n;
-            draw_window(&w, focused, t);
+            draw_window(s, &w, focused && self.kb_on_win, t);
         }
     }
 }
 
-fn draw_window(w: &Win, focused: bool, t: f32) {
-    // cadre + ombre légère
+fn draw_window(slot: usize, w: &Win, kb: bool, t: f32) {
     fb::fill_rect(w.x + 6, w.y + 8, w.w, w.h + TITLE_H, 0);
-    fb::fill_rect(w.x - 1, w.y - 1, w.w + 2, w.h + TITLE_H + 2, P_FRAME);
+    let fc = if kb { P_ACCENT } else { P_FRAME };
+    fb::fill_rect(w.x - 1, w.y - 1, w.w + 2, w.h + TITLE_H + 2, fc);
 
-    // barre de titre
-    let tc = if focused { P_TITLE_HI } else { P_TITLE };
-    fb::fill_rect(w.x, w.y, w.w, TITLE_H, tc);
+    fb::fill_rect(w.x, w.y, w.w, TITLE_H, if kb { P_TITLE_HI } else { P_TITLE });
     font::draw_str_scaled(w.x + 12, w.y + 7, w.title(), P_TEXT, 2);
-    // bouton fermer
     fb::fill_rect(w.x + w.w - 24, w.y + 6, 18, 18, P_CLOSE);
     font::draw_str_scaled(w.x + w.w - 22, w.y + 6, "x", P_TEXT, 2);
 
-    // corps
     let (bx, by, bw, bh) = (w.x, w.y + TITLE_H, w.w, w.h);
     fb::fill_rect(bx, by, bw, bh, P_BODY);
 
     match w.app {
-        App::Code => draw_code(bx, by, bw, bh, w.arg(), t),
-        App::Chat => draw_chat(bx, by, bw, bh),
-        App::Git => draw_git(bx, by, bw, bh, t),
+        App::Editor => editor::draw(slot, bx, by, bw, bh, kb, t),
+        App::Terminal => term::draw(bx, by, bw, bh, t),
+        App::Files => draw_files(bx, by, bw, bh),
         App::Web => draw_web(bx, by, bw, bh, w.arg()),
-        App::Files => draw_files(bx, by, bw, bh, w.arg()),
-        App::FileView => draw_fileview(bx, by, bw, bh, w.arg()),
         App::Hub => draw_hub(bx, by, bw, bh),
-        App::Generic => {
-            font::draw_str_scaled(bx + 40, by + 40, w.arg(), P_TEXT, 3);
-            font::draw_str_scaled(bx + 40, by + 96, "application (maquette)", P_DIM, 2);
+        App::Calc => draw_calc(slot, bx, by, bw, bh),
+        App::Unknown => {
+            font::draw_str_scaled(bx + 40, by + 50, w.arg(), P_TEXT, 3);
+            font::draw_str_scaled(bx + 40, by + 110, "application non disponible.", P_DIM, 2);
+            font::draw_str_scaled(bx + 40, by + 150, "essaie: /app editeur  /app terminal  /app calc", P_DIM, 2);
         }
     }
 }
 
-fn bar(x: i32, y: i32, w: i32, c: u8) {
-    fb::fill_rect(x, y, w, 12, c);
-}
-
-fn draw_code(bx: i32, by: i32, bw: i32, bh: i32, name: &str, t: f32) {
-    fb::fill_rect(bx, by, bw, bh, P_CODE_BG);
-    fb::fill_rect(bx, by, 60, bh, P_TITLE); // marge n° de lignes
-    font::draw_str_scaled(bx + 70, by + 8, name, P_DIM, 2);
-    let mut y = by + 40;
-    let cols = [P_CODE_KW, P_CODE_FN, P_TEXT, P_CODE_STR, P_TEXT, P_TEXT];
-    let widths = [140, 320, 200, 420, 260, 160];
-    let indent = [0, 40, 40, 80, 40, 0];
-    for l in 0..((bh - 60) / 26).min(18) {
-        font::draw_num(bx + 14, y, (l + 1) as u32, 2, P_DIM, 2);
-        let k = (l as usize) % 6;
-        bar(bx + 74 + indent[k], y + 4, widths[k], cols[k]);
-        y += 26;
-    }
-    // curseur qui clignote
-    if (t * 2.0) as i32 % 2 == 0 {
-        fb::fill_rect(bx + 74 + 200, by + 40 + 4 * 26, 3, 18, P_ACCENT);
-    }
-}
-
-fn draw_chat(bx: i32, by: i32, bw: i32, bh: i32) {
-    fb::fill_rect(bx, by, 220, bh, P_TITLE); // liste des salons
-    for i in 0..8 {
-        bar(bx + 20, by + 24 + i * 40, 160, P_DIM);
-    }
-    // bulles
-    let msgs = [(false, 380), (true, 300), (false, 520), (true, 180), (false, 440)];
-    let mut y = by + 40;
-    for (mine, wd) in msgs {
-        let x = if mine { bx + bw - wd - 40 } else { bx + 260 };
-        fb::fill_rect(x, y, wd, 46, if mine { P_ACCENT } else { P_TITLE_HI });
-        y += 70;
-    }
-}
-
-fn draw_git(bx: i32, by: i32, _bw: i32, bh: i32, t: f32) {
-    let off = ((t * 20.0) as i32) % 40;
-    let mut y = by + 20 - off;
-    while y < by + bh {
-        fb::fill_circle((bx + 40) as f32, y as f32, 6.0, P_ACCENT);
-        fb::fill_rect(bx + 38, y, 4, 40, P_DIM);
-        bar(bx + 70, y + 2, 260 + (y % 200), P_TEXT);
-        y += 40;
-    }
+fn draw_files(bx: i32, by: i32, bw: i32, _bh: i32) {
+    font::draw_str_scaled(bx + 24, by + 16, "Fichiers  (/fichier <nom> pour ouvrir)", P_DIM, 2);
+    let cols = ((bw - 40) / 190).max(1);
+    let mut i = 0i32;
+    fs::each(|_, f| {
+        let cx = bx + 24 + (i % cols) * 190;
+        let cy = by + 60 + (i / cols) * 120;
+        let c = if f.is_dir() { P_ACCENT } else { P_TITLE_HI };
+        fb::fill_rect(cx, cy, 60, 74, c);
+        if f.is_dir() {
+            fb::fill_rect(cx + 8, cy + 6, 24, 10, P_BODY);
+        }
+        font::draw_str_scaled(cx, cy + 84, f.name(), P_TEXT, 2);
+        i += 1;
+    });
 }
 
 fn draw_web(bx: i32, by: i32, bw: i32, _bh: i32, query: &str) {
-    // barre d'adresse
-    fb::fill_rect(bx + 20, by + 16, bw - 40, 40, P_TITLE_HI);
-    font::draw_str_scaled(bx + 32, by + 24, "google.com/search?q=", P_DIM, 2);
+    fb::fill_rect(bx + 20, by + 16, bw - 40, 38, P_TITLE_HI);
+    font::draw_str_scaled(bx + 30, by + 24, "recherche locale (hors-ligne) :", P_DIM, 2);
     font::draw_str_scaled(
-        bx + 32 + font::width_scaled("google.com/search?q=", 2),
+        bx + 30 + font::width_scaled("recherche locale (hors-ligne) :", 2),
         by + 24,
         query,
         P_TEXT,
         2,
     );
-    // "résultats"
-    font::draw_str_scaled(bx + 40, by + 90, "Environ 1 000 000 resultats", P_DIM, 2);
-    let mut y = by + 140;
-    for _ in 0..5 {
-        bar(bx + 40, y, 520, P_ACCENT);
-        bar(bx + 40, y + 22, 360, P_CODE_STR);
-        bar(bx + 40, y + 44, 780, P_DIM);
-        bar(bx + 40, y + 64, 700, P_DIM);
-        y += 120;
+    let mut y = by + 80;
+    let q = query.as_bytes();
+    let mut hits = 0;
+    fs::each(|_, f| {
+        if f.is_dir() {
+            return;
+        }
+        if contains_ci(f.content().as_bytes(), q) || contains_ci(f.name().as_bytes(), q) {
+            hits += 1;
+            font::draw_str_scaled(bx + 30, y, f.name(), P_ACCENT, 2);
+            let c = f.content();
+            let snip = if c.len() > 70 { &c[..70] } else { c };
+            font::draw_str_scaled(bx + 30, y + 24, snip, P_DIM, 2);
+            y += 66;
+        }
+    });
+    if hits == 0 {
+        font::draw_str_scaled(bx + 30, y, "aucun resultat local.", P_DIM, 2);
     }
 }
 
-fn draw_files(bx: i32, by: i32, bw: i32, bh: i32, sel: &str) {
-    font::draw_str_scaled(bx + 24, by + 16, "Documents", P_DIM, 2);
-    let names = ["Rapport", "Photos", "notes.txt", "budget", "cv.pdf", "musique", "projet", "todo.md"];
-    let cols = (bw - 40) / 150;
-    for (i, n) in names.iter().enumerate() {
-        let cx = bx + 24 + (i as i32 % cols) * 150;
-        let cy = by + 60 + (i as i32 / cols) * 130;
-        let hit = *n == sel || n.starts_with(sel) && !sel.is_empty();
-        fb::fill_rect(cx, cy, 110, 84, if hit { P_ACCENT } else { P_TITLE_HI });
-        font::draw_str_scaled(cx, cy + 92, n, if hit { P_TEXT } else { P_DIM }, 2);
+fn contains_ci(hay: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() || needle.len() > hay.len() {
+        return false;
     }
-    let _ = bh;
+    let lo = |c: u8| if c.is_ascii_uppercase() { c + 32 } else { c };
+    'o: for i in 0..=hay.len() - needle.len() {
+        for j in 0..needle.len() {
+            if lo(hay[i + j]) != lo(needle[j]) {
+                continue 'o;
+            }
+        }
+        return true;
+    }
+    false
 }
 
-fn draw_fileview(bx: i32, by: i32, bw: i32, bh: i32, name: &str) {
-    // "page" blanche centrée
-    let pw = (bw * 3 / 4).min(760);
-    let px = bx + (bw - pw) / 2;
-    fb::fill_rect(px, by + 20, pw, bh - 40, P_TEXT);
-    font::draw_str_scaled(px + 30, by + 44, name, P_TITLE, 3);
-    let mut y = by + 110;
-    for i in 0..((bh - 160) / 24).min(16) {
-        let w = if i % 4 == 3 { pw / 2 } else { pw - 80 };
-        fb::fill_rect(px + 30, y, w, 8, P_DIM);
-        y += 24;
-    }
-}
-
-fn draw_hub(bx: i32, by: i32, bw: i32, bh: i32) {
-    font::draw_str_dots(bx + (bw - 8 * 8 * 6) / 2, by + 24, "PC PET", P_TEXT, 6);
-    font::draw_str_scaled(bx + 40, by + 150, "Compagnon   : Asti", P_TEXT, 2);
-    font::draw_str_scaled(bx + 40, by + 190, "Nourriture  :", P_DIM, 2);
+fn draw_hub(bx: i32, by: i32, bw: i32, _bh: i32) {
+    font::draw_str_dots(bx + (bw - 6 * 8 * 6) / 2, by + 24, "PC PET", P_TEXT, 6);
+    font::draw_str_scaled(bx + 40, by + 150, "Compagnon  : Asti", P_TEXT, 2);
+    font::draw_str_scaled(bx + 40, by + 190, "Nourriture :", P_DIM, 2);
     let f = crate::home::food() as i32;
-    fb::fill_rect(bx + 250, by + 190, 3 * f, 16, P_ACCENT);
-    font::draw_str_scaled(bx + 40, by + 230, "Etat        : en forme", P_TEXT, 2);
-    font::draw_str_scaled(bx + 40, by + 300, "Glisse une friandise sur lui pour", P_DIM, 2);
-    font::draw_str_scaled(bx + 40, by + 326, "le nourrir. Il reste au-dessus", P_DIM, 2);
-    font::draw_str_scaled(bx + 40, by + 352, "de toutes les fenetres.", P_DIM, 2);
-    let _ = bh;
+    fb::fill_rect(bx + 240, by + 190, 3 * f, 16, P_ACCENT);
+    fb::fill_rect(bx + 240 + 3 * f, by + 190, 3 * (100 - f), 16, P_TITLE_HI);
+    font::draw_str_scaled(bx + 40, by + 236, "Il reste au-dessus de toutes", P_DIM, 2);
+    font::draw_str_scaled(bx + 40, by + 262, "les fenetres et suit l'appli active.", P_DIM, 2);
+    font::draw_str_scaled(bx + 40, by + 320, "Glisse une friandise sur lui pour", P_DIM, 2);
+    font::draw_str_scaled(bx + 40, by + 346, "le nourrir.", P_DIM, 2);
+}
+
+// --- calculatrice ---
+
+#[derive(Clone, Copy)]
+struct Calc {
+    acc: i64,
+    cur: i64,
+    op: u8,
+    fresh: bool,
+    used: bool,
+}
+const C0: Calc = Calc {
+    acc: 0,
+    cur: 0,
+    op: 0,
+    fresh: true,
+    used: false,
+};
+static mut CALCS: [Calc; 6] = [C0; 6];
+
+fn calc_key(slot: usize, c: u8) {
+    let s = unsafe { &mut CALCS[slot] };
+    s.used = true;
+    match c {
+        b'0'..=b'9' => {
+            if s.fresh {
+                s.cur = 0;
+                s.fresh = false;
+            }
+            s.cur = s.cur.saturating_mul(10) + (c - b'0') as i64;
+        }
+        b'+' | b'-' | b'*' | b'/' => {
+            calc_apply(s);
+            s.op = c;
+            s.fresh = true;
+        }
+        b'\n' | b'=' => {
+            calc_apply(s);
+            s.op = 0;
+            s.acc = s.cur;
+            s.fresh = true;
+        }
+        0x08 => {
+            *s = C0;
+            s.used = true;
+        }
+        _ => {}
+    }
+}
+
+fn calc_apply(s: &mut Calc) {
+    let (a, b) = (s.acc, s.cur);
+    s.cur = match s.op {
+        b'+' => a + b,
+        b'-' => a - b,
+        b'*' => a * b,
+        b'/' => {
+            if b != 0 {
+                a / b
+            } else {
+                0
+            }
+        }
+        _ => b,
+    };
+    s.acc = s.cur;
+}
+
+fn draw_calc(slot: usize, bx: i32, by: i32, bw: i32, _bh: i32) {
+    let s = unsafe { CALCS[slot] };
+    fb::fill_rect(bx + 20, by + 20, bw - 40, 70, P_CODE_BG);
+    // affiche s.cur, aligné à droite
+    let v = if s.fresh && s.op != 0 { s.acc } else { s.cur };
+    let mut buf = [0u8; 22];
+    let n = itoa(v, &mut buf);
+    font::draw_str_scaled(bx + bw - 40 - n as i32 * 24, by + 36, core::str::from_utf8(&buf[..n]).unwrap_or("0"), P_TEXT, 3);
+    font::draw_str_scaled(bx + 30, by + 110, "clavier : 0-9  + - * /  Entree  Ret.arr=clear", P_DIM, 2);
+}
+
+fn itoa(mut v: i64, buf: &mut [u8]) -> usize {
+    let neg = v < 0;
+    if neg {
+        v = -v;
+    }
+    let mut tmp = [0u8; 22];
+    let mut n = 0;
+    loop {
+        tmp[n] = b'0' + (v % 10) as u8;
+        v /= 10;
+        n += 1;
+        if v == 0 {
+            break;
+        }
+    }
+    let mut o = 0;
+    if neg {
+        buf[0] = b'-';
+        o = 1;
+    }
+    for i in 0..n {
+        buf[o + i] = tmp[n - 1 - i];
+    }
+    o + n
 }

@@ -153,10 +153,13 @@ pub fn feed(byte: u8) {
             return;
         }
         if ext {
-            // pavé numérique : Entrée et division
             match code {
-                0x1c => push_char(b'\n'),
-                0x35 => push_char(b'/'),
+                0x1c => push_char(b'\n'),     // Entrée du pavé numérique
+                0x35 => push_char(b'/'),      // division du pavé numérique
+                0x48 => push_char(0x11),      // flèche haut  (K_UP)
+                0x50 => push_char(0x12),      // flèche bas   (K_DOWN)
+                0x4b => push_char(0x13),      // flèche gauche
+                0x4d => push_char(0x14),      // flèche droite
                 _ => {}
             }
             return;
@@ -164,6 +167,7 @@ pub fn feed(byte: u8) {
 
         let shift = LSHIFT || RSHIFT;
         match code {
+            0x01 => push_char(0x1b), // Échap
             SC_ENTER => push_char(b'\n'),
             SC_BACKSPACE => push_char(0x08),
             SC_SPACE => push_char(b' '),

@@ -157,15 +157,24 @@ fn ci_contains(hay: &[u8], needle: &[u8]) -> bool {
     false
 }
 
-fn app_kind(name: &[u8]) -> win::App {
-    if ci_contains(name, b"code") || ci_contains(name, b"vscode") {
-        win::App::Code
-    } else if ci_contains(name, b"discord") || ci_contains(name, b"chat") || ci_contains(name, b"slack") {
-        win::App::Chat
-    } else if ci_contains(name, b"git") {
-        win::App::Git
+fn app_kind(name: &[u8]) -> (win::App, &'static [u8]) {
+    if ci_contains(name, b"term") || ci_contains(name, b"shell") || ci_contains(name, b"bash") {
+        (win::App::Terminal, b"Terminal")
+    } else if ci_contains(name, b"calc") {
+        (win::App::Calc, b"Calculatrice")
+    } else if ci_contains(name, b"hub") || ci_contains(name, b"asti") || ci_contains(name, b"pet") {
+        (win::App::Hub, b"PC Pet Hub")
+    } else if ci_contains(name, b"file") || ci_contains(name, b"fichier") || ci_contains(name, b"explor") {
+        (win::App::Files, b"Fichiers")
+    } else if ci_contains(name, b"edit")
+        || ci_contains(name, b"code")
+        || ci_contains(name, b"vscode")
+        || ci_contains(name, b"text")
+        || ci_contains(name, b"note")
+    {
+        (win::App::Editor, b"")
     } else {
-        win::App::Generic
+        (win::App::Unknown, b"")
     }
 }
 
@@ -179,10 +188,16 @@ fn run_command(cmd: &[u8], wm: &mut win::Manager) {
         None => (cmd, &b""[..]),
     };
     match verb {
-        b"/app" if !rest.is_empty() => wm.spawn(app_kind(rest), rest, rest),
-        b"/document" => wm.spawn(win::App::Files, b"Fichiers", rest),
-        b"/fichier" if !rest.is_empty() => wm.spawn(win::App::FileView, rest, rest),
-        b"/web" if !rest.is_empty() => wm.spawn(win::App::Web, b"Recherche Google", rest),
+        b"/app" if !rest.is_empty() => {
+            let (k, t) = app_kind(rest);
+            let title: &[u8] = if t.is_empty() { rest } else { t };
+            wm.spawn(k, title, if k == win::App::Editor { b"" } else { rest });
+        }
+        b"/document" | b"/documents" => wm.spawn(win::App::Files, b"Fichiers", rest),
+        b"/fichier" if !rest.is_empty() => wm.spawn(win::App::Editor, rest, rest),
+        b"/web" if !rest.is_empty() => wm.spawn(win::App::Web, b"Recherche", rest),
+        b"/terminal" | b"/term" => wm.spawn(win::App::Terminal, b"Terminal", b""),
+        b"/aide" | b"/help" => wm.spawn(win::App::Unknown, b"Aide", b"/app /document /fichier /web /terminal"),
         _ => {}
     }
     crate::serial_println!(
@@ -194,12 +209,13 @@ fn run_command(cmd: &[u8], wm: &mut win::Manager) {
 
 fn app_mood(app: win::App) -> (Option<asti::Pose>, asti::Tint) {
     match app {
-        win::App::Code => (Some(asti::Pose::AppCode), asti::Tint::Code),
-        win::App::Chat => (Some(asti::Pose::AppChat), asti::Tint::Chat),
-        win::App::Git => (Some(asti::Pose::AppGit), asti::Tint::Git),
+        win::App::Editor => (Some(asti::Pose::AppCode), asti::Tint::Code),
+        win::App::Terminal => (Some(asti::Pose::AppCode), asti::Tint::Code),
+        win::App::Calc => (Some(asti::Pose::AppGit), asti::Tint::Git),
+        win::App::Files => (Some(asti::Pose::AppGit), asti::Tint::Git),
         win::App::Web => (Some(asti::Pose::AppWeb), asti::Tint::Web),
         win::App::Hub => (Some(asti::Pose::Hub), asti::Tint::Null),
-        _ => (None, asti::Tint::Null),
+        win::App::Unknown => (None, asti::Tint::Null),
     }
 }
 
@@ -281,11 +297,28 @@ pub fn run(mut brain: asti::Brain) -> ! {
         mouse::poll();
         let m = mouse::state();
 
-        // --- saisie clavier dans la barre de commande ---
+        let pressed = m.left && !click_latch;
+
+        // --- fenêtres : la souris d'abord (focus / glisser / fermer) ---
+        let win_took_click = wm.on_mouse(m.x, m.y, m.left, pressed);
+        // clic ailleurs (pas sur une fenêtre) → le clavier revient à la barre
+        if pressed && !win_took_click {
+            wm.blur();
+        }
+
+        // --- saisie clavier : fenêtre au 1er plan, sinon barre de commande ---
         loop {
             let c = kbd::pop_char();
             if c == 0 {
                 break;
+            }
+            if c == 0x1b {
+                wm.blur(); // Échap → revient à la barre de commande
+                continue;
+            }
+            if wm.wants_keys() {
+                wm.feed_key(c);
+                continue;
             }
             match c {
                 b'\n' => {
@@ -306,10 +339,6 @@ pub fn run(mut brain: asti::Brain) -> ! {
                 _ => {}
             }
         }
-        let pressed = m.left && !click_latch;
-
-        // --- fenêtres : la souris d'abord (focus / glisser / fermer) ---
-        wm.on_mouse(m.x, m.y, m.left, pressed);
 
         // humeur + teinte d'Asti selon la fenêtre au premier plan
         let (mood, tint) = match wm.focused_app() {

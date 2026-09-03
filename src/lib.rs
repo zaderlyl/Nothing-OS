@@ -16,8 +16,10 @@
 #![feature(abi_x86_interrupt)]
 
 mod asti;
+mod editor;
 mod fb;
 mod font;
+mod fs;
 mod gdt;
 mod home;
 mod interrupts;
@@ -27,6 +29,7 @@ mod port;
 mod rtc;
 mod serial;
 mod shelf;
+mod term;
 mod time;
 mod vga;
 mod win;
@@ -140,6 +143,7 @@ pub extern "C" fn rust_main() -> ! {
     time::init();
 
     font::capture(); // encore en mode texte : on récupère la police du BIOS
+    fs::init();
     fb::init();
     asti::install_palette(asti::Tint::Null);
     home::install_palette();
