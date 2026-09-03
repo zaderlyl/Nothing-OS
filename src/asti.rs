@@ -425,6 +425,7 @@ pub enum Pose {
     AppChat,
     AppGit,
     AppWeb,
+    AppMusic,
     Hub,
 }
 
@@ -728,6 +729,21 @@ pub fn draw_creature(cv: &mut Canvas, s: &State, t: f32) {
                     ex.push(Extra::Note(cx + 6.0, cy - BODY_H - 1.0 - ((t * 1.3) % 3.5)));
                 }
             }
+            // musique : il fait du "beatbop" — hoche la tête sur le rythme,
+            // notes qui montent (scène 'beatbop' de PC Pet).
+            Pose::AppMusic => {
+                let bass = fabsf(sinf(t * core::f32::consts::TAU * 2.0));
+                cy -= bass * 1.3;
+                tilt = sinf(t * core::f32::consts::TAU * 4.5) * 0.09;
+                eye = EyeStyle::Arc;
+                mouth = Mouth::Wobble;
+                for i in 0..2 {
+                    ex.push(Extra::Note(
+                        cx + 6.0 + i as f32 * 3.0 + sinf(t + i as f32) * 1.0,
+                        cy - 5.0 - ((t * 1.4 + i as f32 * 1.1) % 3.0) * 2.6,
+                    ));
+                }
+            }
             Pose::AppGit => {
                 eye = if (t % 3.4) > 3.2 { EyeStyle::Calm } else { EyeStyle::Dot };
                 mouth = Mouth::Line;
@@ -805,6 +821,7 @@ pub enum Tint {
     Chat,
     Git,
     Web,
+    Music,
 }
 
 fn tint_rgb(t: Tint) -> TintRgb {
@@ -855,6 +872,14 @@ fn tint_rgb(t: Tint) -> TintRgb {
             off_a: 0.13,
             lit: [210, 255, 210],
             glow: [120, 220, 130],
+        },
+        // Musique : violet
+        Tint::Music => TintRgb {
+            bg: [20, 10, 28],
+            off: [180, 120, 235],
+            off_a: 0.14,
+            lit: [232, 205, 255],
+            glow: [190, 120, 255],
         },
     }
 }

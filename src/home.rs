@@ -379,8 +379,10 @@ pub fn run(mut brain: asti::Brain) -> ! {
             }
         }
 
-        // humeur + teinte d'Asti selon la fenêtre au premier plan
-        let (mood, tint) = if crate::docview::active() {
+        // humeur + teinte d'Asti selon le contexte
+        let (mood, tint) = if crate::ac97::playing() {
+            (Some(asti::Pose::AppMusic), asti::Tint::Music)
+        } else if crate::docview::active() {
             (Some(asti::Pose::AppGit), asti::Tint::Git)
         } else {
             match wm.focused_app() {
