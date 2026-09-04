@@ -29,6 +29,8 @@ static mut LAST_MX: i32 = -999;
 static mut LAST_MY: i32 = -999;
 static mut GOT_FULL: bool = false;
 static mut ASK_AT: f32 = -100.0;
+static mut DIAG: u32 = 0;
+static mut ASKS: u32 = 0;
 
 fn u16le(d: &[u8], o: usize) -> usize {
     (d[o] as usize) | ((d[o + 1] as usize) << 8)
@@ -46,8 +48,8 @@ pub fn live() -> bool {
 pub fn poll(now: f32) {
     unsafe {
         NOW = now;
-        if let Some(d) = p9::read_file(FRAME_PATH) {
-            if d.len() >= 15 && &d[0..4] == b"NOSF" {
+        match p9::read_file(FRAME_PATH) {
+            Some(d) if d.len() >= 15 && &d[0..4] == b"NOSF" => {
                 let seq = u32le(&d, 4);
                 SEEN_AT = now;
                 if seq != SEQ {
@@ -66,21 +68,53 @@ pub fn poll(now: f32) {
                         GOT_FULL = true;
                     }
                     let mut p = 15;
+                    let mut tile = [0u8; TILE * TILE];
                     for _ in 0..nt {
-                        if p + 4 + TILE * TILE > d.len() {
+                        if p + 6 > d.len() {
                             break;
                         }
                         let tx = u16le(&d, p);
                         let ty = u16le(&d, p + 2);
-                        p += 4;
+                        let rlen = u16le(&d, p + 4);
+                        p += 6;
+                        if p + rlen > d.len() {
+                            break;
+                        }
+                        // décode le RLE (count, value) → tuile 32×32
+                        let mut ti = 0usize;
+                        let mut q = p;
+                        while q + 1 < p + rlen && ti < TILE * TILE {
+                            let c = d[q] as usize;
+                            let v = d[q + 1];
+                            q += 2;
+                            let end = (ti + c).min(TILE * TILE);
+                            for s in &mut tile[ti..end] {
+                                *s = v;
+                            }
+                            ti = end;
+                        }
+                        p += rlen;
                         for yy in 0..TILE {
                             let row = (ty * TILE + yy) * FW + tx * TILE;
                             if row + TILE <= BUF.len() {
-                                BUF[row..row + TILE].copy_from_slice(&d[p..p + TILE]);
+                                BUF[row..row + TILE]
+                                    .copy_from_slice(&tile[yy * TILE..yy * TILE + TILE]);
                             }
-                            p += TILE;
                         }
                     }
+                    if full || DIAG < 3 {
+                        DIAG += 1;
+                        crate::serial_println!(
+                            "[remote] trame {} {}x{} full={} tuiles={} ({} o)",
+                            seq, w, h, full, nt, d.len()
+                        );
+                    }
+                }
+            }
+            _ => {
+                if FW > 0 && now - SEEN_AT > 3.0 && now - ASK_AT > 3.0 {
+                    ASK_AT = now;
+                    crate::serial_println!("[remote] plus de trame — pont Mac coupe ?");
                 }
             }
         }
@@ -88,7 +122,11 @@ pub fn poll(now: f32) {
         // tant qu'on n'a pas de trame complète, on en redemande une
         if FW > 0 && !GOT_FULL && now - ASK_AT > 0.4 {
             ASK_AT = now;
+            ASKS += 1;
             request_keyframe();
+            if ASKS <= 4 {
+                crate::serial_println!("[remote] demande de keyframe ({})", ASKS);
+            }
         }
 
         if EVN > 0 {
@@ -98,7 +136,13 @@ pub fn poll(now: f32) {
             out.extend_from_slice(&ISEQ.to_le_bytes());
             out.extend_from_slice(&EVN.to_le_bytes());
             out.extend_from_slice(&EVQ);
-            p9::write_file(INPUT_PATH, &out);
+            let ok = p9::write_file(INPUT_PATH, &out);
+            if ISEQ <= 3 {
+                crate::serial_println!(
+                    "[remote] input.bin ecrit iseq={} {} ev ({})",
+                    ISEQ, EVN, if ok { "ok" } else { "ECHEC" }
+                );
+            }
             EVQ.clear();
             EVN = 0;
         }

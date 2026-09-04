@@ -24,14 +24,12 @@ let TILE = 32
 let TX = FW / TILE, TY = FH / TILE
 let FPS = 10.0
 
-// --- cube de couleurs : identique à src/image.rs ---------------------
-let BAYER: [[Int]] = [[0,8,2,10],[12,4,14,6],[3,11,1,9],[15,7,13,5]]
+// --- cube de couleurs (indices 76..255, comme src/image.rs) ----------
+// Pas de tramage : une UI est aplatie, et sans tramage le RLE écrase.
 @inline(__always) func quant(_ r: Int, _ g: Int, _ b: Int, _ x: Int, _ y: Int) -> UInt8 {
-    let d = (BAYER[y & 3][x & 3] - 8) * 6
-    func c(_ v: Int) -> Int { max(0, min(255, v + d)) }
-    let ri = min(5, c(r) * 6 / 256)
-    let gi = min(5, c(g) * 6 / 256)
-    let bi = min(4, c(b) * 5 / 256)
+    let ri = min(5, r * 6 / 256)
+    let gi = min(5, g * 6 / 256)
+    let bi = min(4, b * 5 / 256)
     return UInt8(76 + ri*30 + gi*5 + bi)
 }
 
@@ -123,13 +121,23 @@ func writeFrame(_ dir: String, seq: UInt32, cur: [UInt8], prev: [UInt8]?, full: 
             }
             if changed {
                 n += 1
-                var t = Data(); t.reserveCapacity(4 + TILE*TILE)
-                var a = UInt16(tx).littleEndian; withUnsafeBytes(of: &a) { t.append(contentsOf: $0) }
-                var b = UInt16(ty).littleEndian; withUnsafeBytes(of: &b) { t.append(contentsOf: $0) }
+                var raw = [UInt8](); raw.reserveCapacity(TILE*TILE)
                 for yy in 0..<TILE {
                     let base = (ty*TILE + yy) * FW + tx*TILE
-                    t.append(contentsOf: cur[base..<base+TILE])
+                    raw.append(contentsOf: cur[base..<base+TILE])
                 }
+                // RLE (count, value) — l'UI de Discord est très aplatie
+                var rle = [UInt8](); var i = 0
+                while i < raw.count {
+                    let v = raw[i]; var c = 1
+                    while i + c < raw.count && raw[i+c] == v && c < 255 { c += 1 }
+                    rle.append(UInt8(c)); rle.append(v); i += c
+                }
+                var t = Data()
+                for val in [tx, ty, rle.count] {
+                    var x = UInt16(val).littleEndian; withUnsafeBytes(of: &x) { t.append(contentsOf: $0) }
+                }
+                t.append(contentsOf: rle)
                 tiles.append(t)
             }
         }
@@ -220,18 +228,22 @@ func tick() {
         pumpInput(dir, win, pid)   // avant la capture : prend en compte 'F'
         if let cur = grabIndexed(win) {
             seq &+= 1
-            let full = prev == nil || forceFull || seq % 300 == 0
-            forceFull = false
+            let full = prev == nil || forceFull || seq % 40 == 0
             writeFrame(dir, seq: seq, cur: cur, prev: prev, full: full)
             prev = cur
             if missing != 0 { log("[bridge] capture OK (\(FW)x\(FH))") }
             missing = 0
             diag += 1
-            if diag == 1 || diag % 100 == 0 {
-                let distinct = Set(cur).count
-                let warn = distinct <= 2 ? "  <- probablement PAS de permission Enregistrement de l'ecran" : ""
-                log("[bridge] frame \(seq) — \(distinct) couleurs distinctes\(warn)")
+            let distinct = Set(cur).count
+            if diag == 1 || (full && diag < 6) {
+                if distinct <= 3 {
+                    log("[bridge] ⚠️  \(distinct) couleurs — accorde 'Enregistrement de l'ecran' au Terminal puis relance")
+                } else {
+                    log("[bridge] keyframe \(seq) envoyee (\(distinct) couleurs)")
+                }
             }
+            if forceFull { log("[bridge] keyframe sur demande du noyau (seq \(seq))") }
+            forceFull = false
         } else if missing == 0 {
             log("[bridge] capture nil — accorde 'Enregistrement de l'ecran' au terminal, puis relance")
             missing += 1
