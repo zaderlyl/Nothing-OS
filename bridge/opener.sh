@@ -29,19 +29,36 @@ echo "opener : surveille $FILE"
 echo "(Ctrl-C pour arrêter)"
 
 while true; do
-    cur="$(head -n1 "$FILE" 2>/dev/null | tr -dc 'a-z')"
+    cur="$(sed -n 1p "$FILE" 2>/dev/null | tr -dc 'a-z')"
+    arg="$(sed -n 3p "$FILE" 2>/dev/null)"
     stamp="$(cat "$FILE" 2>/dev/null)"
     if [ -n "$cur" ] && [ "$stamp" != "$last" ]; then
         last="$stamp"
-        case "$cur" in
-            vscode|code) app="Visual Studio Code" ;;
-            affinity)    app="Affinity" ;;
-            discord)     app="Discord" ;;
-            *)           echo "appli inconnue : « $cur »"; app="" ;;
-        esac
-        if [ -n "$app" ]; then
-            echo "$(date '+%H:%M:%S')  ouvre : $app"
-            open -a "$app" || echo "  échec : $app introuvable"
+        if [ "$cur" = "web" ]; then
+            # requête ou URL → navigateur par défaut
+            q="$arg"
+            if printf %s "$q" | grep -qE '^https?://'; then
+                url="$q"
+            elif printf %s "$q" | grep -qE '^[A-Za-z0-9._-]+\.[A-Za-z]{2,}(/.*)?$'; then
+                url="https://$q"
+            else
+                url="https://www.google.com/search?q=$(printf %s "$q" | sed 's/ /+/g')"
+            fi
+            echo "$(date '+%H:%M:%S')  web : $url"
+            open "$url"
+        else
+            case "$cur" in
+                vscode|code) app="Visual Studio Code" ;;
+                affinity)    app="Affinity" ;;
+                discord)     app="Discord" ;;
+                claude)      app="Claude" ;;
+                spotify)     app="Spotify" ;;
+                *)           echo "appli inconnue : « $cur »"; app="" ;;
+            esac
+            if [ -n "$app" ]; then
+                echo "$(date '+%H:%M:%S')  ouvre : $app"
+                open -a "$app" || echo "  échec : $app introuvable"
+            fi
         fi
     fi
     sleep 0.4

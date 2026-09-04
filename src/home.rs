@@ -210,7 +210,7 @@ fn run_command(cmd: &[u8], wm: &mut win::Manager) {
             };
             wm.spawn(win::App::Editor, short, short);
         }
-        b"/web" if !rest.is_empty() => wm.spawn(win::App::Web, b"Recherche", rest),
+        b"/web" if !rest.is_empty() => crate::apps::web(rest),
         b"/terminal" | b"/term" => wm.spawn(win::App::Terminal, b"Terminal", b""),
         b"/aide" | b"/help" => wm.spawn(win::App::Unknown, b"Aide", b"/app /doc /fichier /web /terminal"),
         _ => {}

@@ -310,6 +310,30 @@ pub fn on_click(mx: i32, my: i32) -> bool {
                                 PINNED.retain(|m| m.id != OPEN_ID);
                             } else {
                                 cmd("pin", OPEN_ID);
+                                // retour visuel immédiat (avant le refresh)
+                                if let Some(m) = ITEMS.iter().find(|m| m.id == OPEN_ID) {
+                                    PINNED.insert(
+                                        0,
+                                        Mail {
+                                            id: m.id,
+                                            read: true,
+                                            from: m.from.clone(),
+                                            subject: m.subject.clone(),
+                                            date: m.date.clone(),
+                                        },
+                                    );
+                                } else if let Some(b) = &BODY {
+                                    PINNED.insert(
+                                        0,
+                                        Mail {
+                                            id: b.id,
+                                            read: true,
+                                            from: b.from.clone(),
+                                            subject: b.subject.clone(),
+                                            date: b.date.clone(),
+                                        },
+                                    );
+                                }
                             }
                             return true; // reste ouvert
                         }

@@ -37,6 +37,8 @@ fn set_accent(app: App) {
         App::VsCode => (0, 122, 204),
         App::Affinity => (150, 225, 130),
         App::Discord => (88, 101, 242),
+        App::Claude => (217, 119, 87),
+        App::Spotify => (30, 215, 96),
         App::None => (120, 200, 255),
     };
     fb::set_palette(A_ACC, r, g, b);
@@ -48,6 +50,8 @@ pub enum App {
     VsCode,
     Affinity,
     Discord,
+    Claude,
+    Spotify,
 }
 
 impl App {
@@ -56,6 +60,8 @@ impl App {
             App::VsCode => "vscode",
             App::Affinity => "affinity",
             App::Discord => "discord",
+            App::Claude => "claude",
+            App::Spotify => "spotify",
             App::None => "",
         }
     }
@@ -64,6 +70,8 @@ impl App {
             App::VsCode => "VS Code",
             App::Affinity => "Affinity",
             App::Discord => "Discord",
+            App::Claude => "Claude",
+            App::Spotify => "Spotify",
             App::None => "",
         }
     }
@@ -76,10 +84,12 @@ struct Item {
     glyph: &'static [&'static str],
 }
 
-const ITEMS: [Item; 3] = [
+const ITEMS: [Item; 5] = [
     Item { app: App::VsCode, name: "VS Code", desc: "editeur de code", glyph: dots::CODE },
     Item { app: App::Affinity, name: "Affinity", desc: "dessin / design", glyph: dots::PALETTE },
     Item { app: App::Discord, name: "Discord", desc: "messagerie", glyph: dots::CHAT },
+    Item { app: App::Claude, name: "Claude", desc: "assistant IA", glyph: dots::QUESTION },
+    Item { app: App::Spotify, name: "Spotify", desc: "musique", glyph: dots::NOTE },
 ];
 
 static mut LAUNCH_ON: bool = false; // panneau demandé
@@ -118,11 +128,43 @@ pub fn launch_named(name: &[u8]) -> bool {
         App::Affinity
     } else if has(b"discord") {
         App::Discord
+    } else if has(b"claude") {
+        App::Claude
+    } else if has(b"spotify") || has(b"musique") {
+        App::Spotify
     } else {
         return false;
     };
     launch(app);
     true
+}
+
+/// `/web <requête ou url>` — ouvre le navigateur du Mac par-dessus l'OS.
+pub fn web(query: &[u8]) {
+    unsafe {
+        LAUNCH_ON = false;
+        SEQ = SEQ.wrapping_add(1);
+        let mut buf = alloc::vec::Vec::with_capacity(query.len() + 16);
+        buf.extend_from_slice(b"web\n");
+        let mut n = SEQ;
+        let mut d = [0u8; 10];
+        let mut i = d.len();
+        loop {
+            i -= 1;
+            d[i] = b'0' + (n % 10) as u8;
+            n /= 10;
+            if n == 0 {
+                break;
+            }
+        }
+        buf.extend_from_slice(&d[i..]);
+        buf.push(b'\n');
+        buf.extend_from_slice(query);
+        buf.push(b'\n');
+        crate::p9::write_file(OPEN_PATH, &buf);
+        LAST_AT = -100.0; // pas de carton : l'ouverture du navigateur suffit
+    }
+    crate::serial_println!("[apps] /web -> navigateur");
 }
 
 fn launch(app: App) {
@@ -174,6 +216,8 @@ pub fn mood() -> (Option<asti::Pose>, asti::Tint) {
         App::VsCode => (Some(asti::Pose::AppCode), asti::Tint::Code),
         App::Affinity => (Some(asti::Pose::AppArt), asti::Tint::Web),
         App::Discord => (Some(asti::Pose::AppChat), asti::Tint::Chat),
+        App::Spotify => (Some(asti::Pose::AppMusic), asti::Tint::Music),
+        App::Claude => (Some(asti::Pose::AppChat), asti::Tint::Chat),
         App::None => (Some(asti::Pose::AppGit), asti::Tint::Git),
     }
 }

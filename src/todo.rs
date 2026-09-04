@@ -174,9 +174,10 @@ pub fn draw_sidebar(
                 crate::fb::fill_rect(x + 4, y + 4, 12, 12, col_accent);
             }
             let tc = if it.done { col_dim } else { col_text };
-            fit(x + 34, y, x + w - 28, &it.text, tc);
-            // croix de suppression, à droite
-            font::draw_str_scaled(x + w - 20, y, "x", col_dim, 2);
+            fit(x + 34, y, x + w - 44, &it.text, tc);
+            // bouton de suppression, à droite (zone large)
+            crate::fb::fill_rect(x + w - 26, y - 2, 24, 24, col_box);
+            font::draw_str_scaled(x + w - 20, y, "x", col_text, 2);
             y += ROW_H;
         }
         // ligne « + ajouter »
@@ -204,11 +205,13 @@ pub fn sidebar_click(mx: i32, my: i32, x: i32, w: i32) -> bool {
         }
         for i in 0..N_ROWS {
             let ry = CHK_Y[i];
-            if my >= ry - 6 && my < ry + ROW_H - 6 {
-                if mx >= x + w - 34 {
-                    remove(i);
+            if my >= ry - 8 && my < ry + ROW_H - 4 {
+                if mx >= x + w - 44 {
+                    remove(i); // clic sur la zone « x » à droite
+                } else if mx <= x + 30 {
+                    toggle(i); // clic sur la case à gauche
                 } else {
-                    toggle(i);
+                    toggle(i); // clic sur le texte : coche aussi
                 }
                 return true;
             }

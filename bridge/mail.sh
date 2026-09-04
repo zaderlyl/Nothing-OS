@@ -268,7 +268,7 @@ while True:
         parts = cur.split()
         if len(parts) >= 3:
             do_cmd(parts[1], parts[2])
-            if parts[1] in ("read", "archive"):
+            if parts[1] in ("read", "archive", "pin", "unpin"):
                 tick = 0  # rafraîchit la liste tout de suite
     if tick <= 0:
         try:
