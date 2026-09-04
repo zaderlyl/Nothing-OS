@@ -139,13 +139,14 @@ pub fn launch_named(name: &[u8]) -> bool {
     true
 }
 
-/// `/web <requête ou url>` — ouvre le navigateur du Mac par-dessus l'OS.
+/// `/web <requête ou url>` — délègue à `bridge/web.sh` : si c'est une
+/// question, il récupère une réponse (affichée sous la barre par
+/// `src/web.rs`) ; sinon il ouvre le navigateur.
 pub fn web(query: &[u8]) {
     unsafe {
         LAUNCH_ON = false;
         SEQ = SEQ.wrapping_add(1);
         let mut buf = alloc::vec::Vec::with_capacity(query.len() + 16);
-        buf.extend_from_slice(b"web\n");
         let mut n = SEQ;
         let mut d = [0u8; 10];
         let mut i = d.len();
@@ -161,10 +162,11 @@ pub fn web(query: &[u8]) {
         buf.push(b'\n');
         buf.extend_from_slice(query);
         buf.push(b'\n');
-        crate::p9::write_file(OPEN_PATH, &buf);
-        LAST_AT = -100.0; // pas de carton : l'ouverture du navigateur suffit
+        crate::p9::write_file(".nothingos-web", &buf);
+        LAST_AT = -100.0;
     }
-    crate::serial_println!("[apps] /web -> navigateur");
+    crate::web::pending();
+    crate::serial_println!("[apps] /web");
 }
 
 fn launch(app: App) {

@@ -54,6 +54,7 @@ mod usb;
 mod vga;
 mod virtio;
 mod wav;
+mod web;
 mod win;
 
 use core::panic::PanicInfo;

@@ -120,6 +120,19 @@ fn draw_hero(now: f32, input: &str) {
     if (now * 2.0) as i32 % 2 == 0 {
         fb::fill_rect(caret_x, by + 12, 3, bh - 24, PAL_TEXT);
     }
+
+    // réponse /web sous la barre
+    crate::web::draw(bx, by + bh, bw, now);
+}
+
+/// Rectangle de la barre de recherche (doit suivre `draw_hero`).
+fn search_rect() -> (i32, i32, i32, i32) {
+    let bw = 900;
+    let bh = 54;
+    let bx = (W - bw) / 2;
+    let ty = H * 30 / 100;
+    let by = ty + 16 * 10 + 60; // DOT_CELL = 10
+    (bx, by, bw, bh)
 }
 
 // --- analyse d'une commande "/verbe reste" ---
@@ -368,6 +381,7 @@ pub fn run(mut brain: asti::Brain) -> ! {
         crate::mail::poll(now); // boîte mail (.nothingos-mail)
         crate::mail::update(dt);
         crate::agenda::update(dt);
+        crate::web::poll(now); // réponse /web (.nothingos-web-answer)
         let m = mouse::state();
 
         let pressed = m.left && !click_latch;
@@ -444,7 +458,9 @@ pub fn run(mut brain: asti::Brain) -> ! {
             }
             if c == 0x1b {
                 // Échap → ferme l'appli / la consultation, sinon barre
-                if crate::apps::active() {
+                if crate::web::visible() {
+                    crate::web::dismiss();
+                } else if crate::apps::active() {
                     crate::apps::close();
                 } else if crate::agenda::detail_active() {
                     crate::agenda::close_detail();

@@ -115,19 +115,17 @@ pub fn draw_sidebar_pins(x0: i32, mut y: i32, w: i32, head: u8, txt: u8, dim: u8
     unsafe {
         font::draw_str_scaled(x0, y, "EPINGLES", head, 2);
         y += 40;
-        PIN_N = PINNED.len().min(6);
+        let _ = acc;
+        PIN_N = PINNED.len().min(5);
         if PIN_N == 0 {
             font::draw_str_scaled(x0, y, "aucun", dim, 2);
             return y + 36;
         }
-        for (i, m) in PINNED.iter().take(6).enumerate() {
+        for (i, m) in PINNED.iter().take(5).enumerate() {
             PIN_Y[i] = y;
-            let _ = acc;
-            font::draw_str_scaled(x0, y, &m.from, txt, 2);
-            let mut line = m.subject.clone();
-            trunc_at(x0, y + 22, x0 + w, &line, dim);
-            let _ = &mut line;
-            y += 52;
+            fit(x0, y, x0 + w, &m.from, txt);
+            fit(x0, y + 28, x0 + w, &m.subject, dim);
+            y += 62;
         }
         y
     }
