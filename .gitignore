@@ -3,7 +3,6 @@
 *.ppm
 .DS_Store
 /*.png
-/bridge/NothingBridge.app/
 /bridge/discord-bridge
 /build
 /isodir

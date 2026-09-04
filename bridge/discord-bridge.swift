@@ -5,9 +5,9 @@
 // les tuiles 32×32 modifiées (RLE) dans <partage>/.nothingos-bridge/
 // frame.bin. Lit input.bin et rejoue souris/clavier vers Discord.
 //
-// À lancer via le bundle (build.sh) pour que la capture d'écran marche :
-//     bridge/build.sh && open bridge/NothingBridge.app --args ~/Documents
-// Log : ~/Library/Logs/nothing-bridge.log
+// Compil + lancement :  bridge/build.sh && bridge/run.sh
+// (lancé depuis le Terminal, il hérite de son autorisation écran).
+// Journal : ~/Library/Logs/nothing-bridge.log
 
 import Cocoa
 import CoreGraphics
@@ -128,37 +128,38 @@ final class Cap: NSObject, SCStreamOutput, SCStreamDelegate {
     init(_ dir: String) { self.dir = dir; super.init() }
 
     func begin() {
-        Task { @MainActor in
-            while !CGPreflightScreenCaptureAccess() {
-                if !askedOnce { askedOnce = true
-                    log("[bridge] demande de l'autorisation « Enregistrement de l'ecran »…")
-                    _ = CGRequestScreenCaptureAccess()
-                } else if !waitLogged { waitLogged = true
-                    log("[bridge] en attente — coche « NothingBridge » dans Reglages ▸ Enregistrement de l'ecran, puis QUITTE et relance")
-                }
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
-            }
-            log("[bridge] autorisation OK")
-            await self.startStream()
-        }
+        Task { @MainActor in await self.startStream() }
     }
 
     func restart(_ why: String) {
         if restarting { return }
         restarting = true
-        log("[bridge] \(why) — relance dans 2 s")
+        log("[bridge] \(why) — nouvel essai dans 3 s")
         try? stream?.stopCapture { _ in }
         stream = nil
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             self?.restarting = false
             Task { @MainActor in await self?.startStream() }
         }
     }
 
     func startStream() async {
-        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
-            restart("contenu partageable indisponible"); return
+        // On interroge SCShareableContent directement : si l'app est
+        // autorisée ça marche ; sinon macOS affiche UNE boîte de dialogue
+        // (on ne rappelle qu'après 3 s, donc pas de boucle de pop-up).
+        let content: SCShareableContent
+        do {
+            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        } catch {
+            if !askedOnce {
+                askedOnce = true
+                _ = CGRequestScreenCaptureAccess()
+                log("[bridge] autorisation « Enregistrement de l'ecran » requise pour NothingBridge — coche-la dans Reglages, le pont la prendra en compte tout seul")
+            }
+            restart("pas encore autorise")
+            return
         }
+        if frames == 0 && !waitLogged { waitLogged = true; log("[bridge] acces ecran OK") }
         var win: SCWindow? = nil; var area: CGFloat = 0
         for w in content.windows {
             guard (w.owningApplication?.applicationName ?? "").contains("Discord"), w.windowLayer == 0 else { continue }
