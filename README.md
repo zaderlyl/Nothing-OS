@@ -164,8 +164,10 @@ rustup default stable                 # installe la toolchain Rust stable
 rustup target add x86_64-unknown-linux-gnu   # core/std x86_64 précompilés
 
 # 2. Construire + lancer
-make run            # plein écran — CLIQUE dans la fenêtre pour que la
-                    #   souris marche (PS/2 relative) ; ⌃⌥G la relâche.
+make run            # plein écran (l'image 1080p est mise à l'échelle
+                    #   pour remplir l'écran, cocoa zoom-to-fit).
+                    #   CLIQUE une fois dans l'écran pour capturer la
+                    #   souris (PS/2 relative) ; ⌃⌥G la relâche.
                     #   Lance aussi bridge/opener.sh (ouvre la vraie appli
                     #   Mac quand tu fais /app dans l'OS)
 make run-win        # idem mais dans une fenêtre classique

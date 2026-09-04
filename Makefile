@@ -70,6 +70,21 @@ QEMU_9P    := -fsdev local,id=fsdev0,path=$(SHARE),security_model=none \
 AUDIODEV   ?= coreaudio,id=snd
 QEMU_SND   := -audiodev $(AUDIODEV) -device AC97,audiodev=snd
 
+# --- affichage --------------------------------------------------------
+# Le noyau rend en 1920x1080 fixe. Sur macOS l'affichage `cocoa` peut
+# METTRE À L'ÉCHELLE cette image pour remplir la fenêtre / l'écran
+# (`zoom-to-fit=on`) — sans quoi `-full-screen` laisse un cadre 1080p au
+# milieu de bandes noires. La souris PS/2 est *relative* : clique une
+# fois dans l'écran pour la « capturer » (⌃⌥G la relâche).
+UNAME := $(shell uname)
+ifeq ($(UNAME),Darwin)
+  QEMU_VIEW_FULL := -display cocoa,zoom-to-fit=on,full-screen=on
+  QEMU_VIEW_WIN  := -display cocoa,zoom-to-fit=on
+else
+  QEMU_VIEW_FULL := -full-screen
+  QEMU_VIEW_WIN  :=
+endif
+
 .PHONY: all kernel iso run run-win run-headless run-iso clean
 
 all: $(KERNEL_BIN)
@@ -117,11 +132,11 @@ OPENER_LOG := /tmp/nothing-opener.log
 run: $(KERNEL_BIN) $(DISK)
 	@echo "opener en tâche de fond (journal : $(OPENER_LOG))"
 	@bash -c 'bash bridge/opener.sh "$(SHARE)" >$(OPENER_LOG) 2>&1 & OP=$$!; trap "kill $$OP 2>/dev/null" EXIT; \
-	  $(QEMU) -kernel $(KERNEL_BIN) -vga std -full-screen $(QEMU_DISK) $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS)'
+	  $(QEMU) -kernel $(KERNEL_BIN) -vga std $(QEMU_VIEW_FULL) $(QEMU_DISK) $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS)'
 
 run-win: $(KERNEL_BIN) $(DISK)
 	@bash -c 'bash bridge/opener.sh "$(SHARE)" >$(OPENER_LOG) 2>&1 & OP=$$!; trap "kill $$OP 2>/dev/null" EXIT; \
-	  $(QEMU) -kernel $(KERNEL_BIN) -vga std $(QEMU_DISK) $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS)'
+	  $(QEMU) -kernel $(KERNEL_BIN) -vga std $(QEMU_VIEW_WIN) $(QEMU_DISK) $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS)'
 
 run-headless: $(KERNEL_BIN)
 	$(QEMU) -kernel $(KERNEL_BIN) -display none $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS)
