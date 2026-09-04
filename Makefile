@@ -52,7 +52,9 @@ DISK       := nothingos.img
 
 # 1 Gio de RAM : le tas du noyau est large (décodage d'images, voir
 # src/heap.rs) et l'identity-map du boot couvre le 1er Gio.
-QEMU_FLAGS := -m 1G -no-reboot -no-shutdown
+# `-rtc base=localtime` : le CMOS montre l'heure LOCALE du Mac (sinon
+# QEMU met l'UTC et l'horloge de l'OS est décalée). src/rtc.rs lit ça.
+QEMU_FLAGS := -m 1G -no-reboot -no-shutdown -rtc base=localtime
 # disque persistant : image raw de 16 Mio sur le Mac, vue comme un vrai
 # disque dur par le noyau (canal IDE primaire).
 QEMU_DISK  := -drive file=$(DISK),format=raw,if=ide,index=0

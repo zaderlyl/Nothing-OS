@@ -27,6 +27,11 @@ pub fn starve(amount: u8) {
     FOOD.store(food().saturating_sub(amount), Ordering::Relaxed);
 }
 
+/// Asti n'est plus dessiné DANS la page de l'OS : il tourne comme
+/// compagnon macOS séparé (pc-pet), toujours au-dessus des fenêtres.
+/// (mettre à `true` pour le réafficher dans l'OS + l'étagère à friandises)
+const ASTI_IN_OS: bool = false;
+
 // --- palette du bureau (indices 6..=15) ---
 const PAL_SIDE: u8 = 6;
 const PAL_DIVIDER: u8 = 7;
@@ -410,14 +415,15 @@ pub fn run(mut brain: asti::Brain) -> ! {
             asti::install_palette(tint);
         }
 
-        // --- étagère : suit le survol d'Asti ---
+        // --- étagère : suit le survol d'Asti (désactivée hors OS) ---
         let (dcx, dcy) = asti::disc_center(asti::HOME_OX);
         let rad = asti::disc_radius();
-        let over_asti = {
+        let over_asti = ASTI_IN_OS && {
             let (dx, dy) = (m.x as f32 - dcx, m.y as f32 - dcy);
             dx * dx + dy * dy < (rad + 8.0) * (rad + 8.0)
         };
-        let over_shelf = shelf_out > 0.3
+        let over_shelf = ASTI_IN_OS
+            && shelf_out > 0.3
             && (shelf::hit(m.x, m.y, now).is_some() || shelf::info_hit(m.x, m.y));
         if (over_asti || over_shelf || drag.is_some())
             && !crate::docview::active()
@@ -482,14 +488,16 @@ pub fn run(mut brain: asti::Brain) -> ! {
             crate::docview::draw(now); // panneaux de consultation
         }
         crate::apps::draw(now); // appli plein écran OU panneau de choix
-        if !app_full && shelf_out > 0.03 && !crate::docview::active() {
+        if ASTI_IN_OS && !app_full && shelf_out > 0.03 && !crate::docview::active() {
             shelf::draw(shelf_out, now);
         }
-        asti::render(&cv, asti::HOME_OX); // Asti par-dessus TOUT
-        if let Some(kind) = drag {
-            if !app_full {
-                let (tw, th) = shelf::treat_size(kind, 5);
-                shelf::draw_treat_at(kind, m.x - tw / 2, m.y - th / 2, 5);
+        if ASTI_IN_OS {
+            asti::render(&cv, asti::HOME_OX); // Asti par-dessus TOUT
+            if let Some(kind) = drag {
+                if !app_full {
+                    let (tw, th) = shelf::treat_size(kind, 5);
+                    shelf::draw_treat_at(kind, m.x - tw / 2, m.y - th / 2, 5);
+                }
             }
         }
         mouse::draw_cursor(m.x, m.y, PAL_CURSOR, PAL_CURSOR_EDGE, 3, m.left && drag.is_none());
