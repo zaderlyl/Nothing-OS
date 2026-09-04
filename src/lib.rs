@@ -215,34 +215,38 @@ fn panic(info: &PanicInfo) -> ! {
 // avec `ld`, sans libc) trouve tout ce dont elle a besoin.
 // ---------------------------------------------------------------------
 
+use core::ffi::{c_char, c_int, c_void};
+
 #[no_mangle]
-pub unsafe extern "C" fn memcpy(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+pub unsafe extern "C" fn memcpy(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void {
+    let (d, s) = (dest as *mut u8, src as *const u8);
     let mut i = 0;
     while i < n {
-        *dest.add(i) = *src.add(i);
+        *d.add(i) = *s.add(i);
         i += 1;
     }
     dest
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn memset(dest: *mut u8, c: i32, n: usize) -> *mut u8 {
+pub unsafe extern "C" fn memset(dest: *mut c_void, c: c_int, n: usize) -> *mut c_void {
+    let d = dest as *mut u8;
     let mut i = 0;
     while i < n {
-        *dest.add(i) = c as u8;
+        *d.add(i) = c as u8;
         i += 1;
     }
     dest
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn memcmp(s1: *const u8, s2: *const u8, n: usize) -> i32 {
+pub unsafe extern "C" fn memcmp(s1: *const c_void, s2: *const c_void, n: usize) -> c_int {
+    let (a, b) = (s1 as *const u8, s2 as *const u8);
     let mut i = 0;
     while i < n {
-        let a = *s1.add(i);
-        let b = *s2.add(i);
-        if a != b {
-            return a as i32 - b as i32;
+        let (x, y) = (*a.add(i), *b.add(i));
+        if x != y {
+            return x as c_int - y as c_int;
         }
         i += 1;
     }
@@ -250,7 +254,7 @@ pub unsafe extern "C" fn memcmp(s1: *const u8, s2: *const u8, n: usize) -> i32 {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn bcmp(s1: *const u8, s2: *const u8, n: usize) -> i32 {
+pub unsafe extern "C" fn bcmp(s1: *const c_void, s2: *const c_void, n: usize) -> c_int {
     memcmp(s1, s2, n)
 }
 
@@ -271,7 +275,7 @@ pub extern "C" fn _Unwind_Resume() -> ! {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn strlen(s: *const u8) -> usize {
+pub unsafe extern "C" fn strlen(s: *const c_char) -> usize {
     let mut n = 0;
     while *s.add(n) != 0 {
         n += 1;
@@ -290,14 +294,15 @@ pub extern "C" fn abs(x: i32) -> i32 {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn memmove(dest: *mut u8, src: *const u8, n: usize) -> *mut u8 {
+pub unsafe extern "C" fn memmove(dest: *mut c_void, src: *const c_void, n: usize) -> *mut c_void {
     if (dest as usize) < (src as usize) {
         memcpy(dest, src, n)
     } else {
+        let (d, s) = (dest as *mut u8, src as *const u8);
         let mut i = n;
         while i != 0 {
             i -= 1;
-            *dest.add(i) = *src.add(i);
+            *d.add(i) = *s.add(i);
         }
         dest
     }
