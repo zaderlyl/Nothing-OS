@@ -164,9 +164,11 @@ rustup default stable                 # installe la toolchain Rust stable
 rustup target add x86_64-unknown-linux-gnu   # core/std x86_64 précompilés
 
 # 2. Construire + lancer
-make run            # QEMU fenêtré — CLIQUE dans la fenêtre pour que la
-                    #   souris marche (PS/2 relative) ; ⌃⌥G la relâche
-make run-fs         # idem, plein écran (⌃⌘F pour sortir)
+make run            # plein écran — CLIQUE dans la fenêtre pour que la
+                    #   souris marche (PS/2 relative) ; ⌃⌥G la relâche.
+                    #   Lance aussi bridge/opener.sh (ouvre la vraie appli
+                    #   Mac quand tu fais /app dans l'OS)
+make run-win        # idem mais dans une fenêtre classique
 make run-headless   # sans affichage, traces de boot sur le port série
 ```
 

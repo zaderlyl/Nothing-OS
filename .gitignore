@@ -3,7 +3,6 @@
 *.ppm
 .DS_Store
 /*.png
-/bridge/discord-bridge
 /build
 /isodir
 /kernel.bin
