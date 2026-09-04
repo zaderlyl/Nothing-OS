@@ -12,3 +12,5 @@
 bridge/calendar.url
 bridge/calendar.local
 bridge/mail-pins.tsv
+bridge/websearch.env
+__pycache__/

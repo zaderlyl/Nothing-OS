@@ -121,18 +121,8 @@ fn draw_hero(now: f32, input: &str) {
         fb::fill_rect(caret_x, by + 12, 3, bh - 24, PAL_TEXT);
     }
 
-    // réponse /web sous la barre
-    crate::web::draw(bx, by + bh, bw, now);
-}
-
-/// Rectangle de la barre de recherche (doit suivre `draw_hero`).
-fn search_rect() -> (i32, i32, i32, i32) {
-    let bw = 900;
-    let bh = 54;
-    let bx = (W - bw) / 2;
-    let ty = H * 30 / 100;
-    let by = ty + 16 * 10 + 60; // DOT_CELL = 10
-    (bx, by, bw, bh)
+    // réponse / résultats / article de /web, sous la barre
+    crate::web::draw(now);
 }
 
 // --- analyse d'une commande "/verbe reste" ---
@@ -396,9 +386,16 @@ pub fn run(mut brain: asti::Brain) -> ! {
         if scroll != 0 && crate::mail::active() {
             crate::mail::on_scroll(m.x, m.y, scroll);
         }
-        let apps_took = pressed && crate::apps::active() && crate::apps::on_click(m.x, m.y);
+        if scroll != 0 && crate::web::visible() {
+            crate::web::on_scroll(scroll);
+        }
+        let web_took = pressed && crate::web::visible() && crate::web::on_click(m.x, m.y);
+        let apps_took = !web_took
+            && pressed
+            && crate::apps::active()
+            && crate::apps::on_click(m.x, m.y);
         // clics dans la barre latérale (Mail / évènements agenda)
-        if pressed && !apps_took && side_out > 0.5 {
+        if pressed && !apps_took && !web_took && side_out > 0.5 {
             let sx = lerp(-(SIDE_W as f32) - 4.0, 0.0, side_out) as i32;
             let my0 = unsafe { SIDEBAR_MAIL_Y };
             let sw = SIDE_W - PAD * 2;
@@ -417,16 +414,19 @@ pub fn run(mut brain: asti::Brain) -> ! {
         // le détail agenda : clics sur son panneau (droite) OU au centre
         // (pour fermer). Pas dans la barre latérale (qui le (r)ouvre).
         let ag_took = !apps_took
+            && !web_took
             && pressed
             && crate::agenda::detail_active()
             && (m.x > W - 640 || (m.x > SIDE_W + 40 && side_out < 0.6))
             && crate::agenda::on_click(m.x, m.y);
         let mail_took = !apps_took
+            && !web_took
             && !ag_took
             && pressed
             && crate::mail::active()
             && crate::mail::on_click(m.x, m.y);
         let dv_took = !apps_took
+            && !web_took
             && !mail_took
             && !ag_took
             && pressed
@@ -438,10 +438,10 @@ pub fn run(mut brain: asti::Brain) -> ! {
             m.x,
             m.y,
             m.left,
-            pressed && !dv_took && !apps_took && !mail_took && !ag_took,
+            pressed && !dv_took && !apps_took && !web_took && !mail_took && !ag_took,
         );
         // clic ailleurs (pas sur une fenêtre) → le clavier revient à la barre
-        if pressed && !dv_took && !apps_took && !mail_took && !ag_took && !win_took_click {
+        if pressed && !dv_took && !apps_took && !web_took && !mail_took && !ag_took && !win_took_click {
             wm.blur();
         }
 
