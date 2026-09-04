@@ -164,14 +164,21 @@ rustup default stable                 # installe la toolchain Rust stable
 rustup target add x86_64-unknown-linux-gnu   # core/std x86_64 précompilés
 
 # 2. Construire + lancer
-make run            # plein écran (l'image 1080p est mise à l'échelle
-                    #   pour remplir l'écran, cocoa zoom-to-fit).
-                    #   CLIQUE une fois dans l'écran pour capturer la
-                    #   souris (PS/2 relative) ; ⌃⌥G la relâche.
-                    #   Lance aussi bridge/opener.sh (ouvre la vraie appli
-                    #   Mac quand tu fais /app dans l'OS)
-make run-win        # idem mais dans une fenêtre classique
+make run            # « faux plein écran » : QEMU en fenêtre agrandie à
+                    #   tout l'écran (bridge/kiosk.sh). Les vraies apps du
+                    #   Mac se superposent SANS changer de Space. Lance
+                    #   aussi bridge/opener.sh (/app ouvre la vraie appli).
+                    #   1re fois : autorise « Accessibilité » au terminal.
+                    #   CLIQUE une fois pour capturer la souris ; ⌃⌥G relâche.
+make run-fs         # vrai plein écran QEMU (Space dédié) — mais ouvrir
+                    #   une appli Mac éjecte le plein écran
+make run-win        # fenêtre classique
 make run-headless   # sans affichage, traces de boot sur le port série
+
+# Immersion totale (masquer barre de menus + Dock, coins actifs) —
+# réglages macOS, réversibles :
+bridge/kiosk-lockdown.sh --apply     # active
+bridge/kiosk-lockdown.sh --restore   # remet par défaut
 ```
 
 Raccourci dans l'OS : **Maj + Tab + Cmd** pour l'éteindre.

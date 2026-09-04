@@ -71,21 +71,27 @@ AUDIODEV   ?= coreaudio,id=snd
 QEMU_SND   := -audiodev $(AUDIODEV) -device AC97,audiodev=snd
 
 # --- affichage --------------------------------------------------------
-# Le noyau rend en 1920x1080 fixe. Sur macOS l'affichage `cocoa` peut
-# METTRE À L'ÉCHELLE cette image pour remplir la fenêtre / l'écran
-# (`zoom-to-fit=on`) — sans quoi `-full-screen` laisse un cadre 1080p au
-# milieu de bandes noires. La souris PS/2 est *relative* : clique une
-# fois dans l'écran pour la « capturer » (⌃⌥G la relâche).
+# Le noyau rend en 1920x1080 fixe ; `cocoa,zoom-to-fit=on` met l'image à
+# l'échelle de la fenêtre.
+#
+#   make run       « faux plein écran » : QEMU en FENÊTRE agrandie à tout
+#                  l'écran (bridge/kiosk.sh). Les vraies apps du Mac se
+#                  superposent sans changer de Space. Pour masquer barre
+#                  de menus + Dock : réglages macOS (voir bridge/README).
+#   make run-fs    vrai plein écran QEMU (Space dédié, barre/Dock cachés
+#                  d'office) — mais ouvrir une app Mac éjecte le plein
+#                  écran.
+#   make run-win   fenêtre classique.
 UNAME := $(shell uname)
 ifeq ($(UNAME),Darwin)
-  QEMU_VIEW_FULL := -display cocoa,zoom-to-fit=on,full-screen=on
   QEMU_VIEW_WIN  := -display cocoa,zoom-to-fit=on
+  QEMU_VIEW_FULL := -display cocoa,zoom-to-fit=on,full-screen=on
 else
-  QEMU_VIEW_FULL := -full-screen
   QEMU_VIEW_WIN  :=
+  QEMU_VIEW_FULL := -full-screen
 endif
 
-.PHONY: all kernel iso run run-win run-headless run-iso clean
+.PHONY: all kernel iso run run-fs run-win run-headless run-iso clean
 
 all: $(KERNEL_BIN)
 
@@ -121,16 +127,21 @@ $(KERNEL_MB): kernel $(BUILD_DIR)/boot-mb.o $(BUILD_DIR)/long_mode.o $(LINKER)
 		$(KERNEL_LIB)
 
 # --- Lancement direct (PVH, sans GRUB) -------------------------------
-# Plein écran par défaut (l'OS occupe tout l'écran, tout le temps).
-# La souris PS/2 est *relative* : QEMU ne l'envoie au noyau que quand le
-# pointeur est "capturé" → clique une fois dans la fenêtre. ⌃⌥G le
-# relâche (macOS). `make run-win` pour une fenêtre classique.
-#
-# On lance aussi `bridge/opener.sh` en tâche de fond : il ouvre la vraie
-# appli du Mac quand tu fais `/app` dans l'OS (journal : $(OPENER_LOG)).
+# La souris PS/2 est *relative* : clique une fois dans l'écran pour la
+# « capturer » (⌃⌥G la relâche). `bridge/opener.sh` tourne en tâche de
+# fond : il ouvre la vraie appli du Mac quand tu fais `/app` dans l'OS
+# (journal : $(OPENER_LOG)).
 OPENER_LOG := /tmp/nothing-opener.log
 run: $(KERNEL_BIN) $(DISK)
-	@echo "opener en tâche de fond (journal : $(OPENER_LOG))"
+ifeq ($(UNAME),Darwin)
+	@KERNEL="$(CURDIR)/$(KERNEL_BIN)" DISK="$(CURDIR)/$(DISK)" QEMU="$(QEMU)" \
+	  AUDIODEV="$(AUDIODEV)" OPENER_LOG="$(OPENER_LOG)" bash bridge/kiosk.sh "$(SHARE)"
+else
+	@bash -c 'bash bridge/opener.sh "$(SHARE)" >$(OPENER_LOG) 2>&1 & OP=$$!; trap "kill $$OP 2>/dev/null" EXIT; \
+	  $(QEMU) -kernel $(KERNEL_BIN) -vga std -full-screen $(QEMU_DISK) $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS)'
+endif
+
+run-fs: $(KERNEL_BIN) $(DISK)
 	@bash -c 'bash bridge/opener.sh "$(SHARE)" >$(OPENER_LOG) 2>&1 & OP=$$!; trap "kill $$OP 2>/dev/null" EXIT; \
 	  $(QEMU) -kernel $(KERNEL_BIN) -vga std $(QEMU_VIEW_FULL) $(QEMU_DISK) $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS)'
 
