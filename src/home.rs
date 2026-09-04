@@ -335,6 +335,7 @@ pub fn run(mut brain: asti::Brain) -> ! {
         mouse::poll();
         crate::ac97::poll(); // réalimente la carte son
         crate::sysinfo::poll(now); // infos Mac (.nothingos-sys)
+        crate::agenda::poll(now); // agenda (.nothingos-cal)
         let m = mouse::state();
 
         let pressed = m.left && !click_latch;
@@ -502,6 +503,9 @@ pub fn run(mut brain: asti::Brain) -> ! {
             crate::docview::draw(now); // panneaux de consultation
             if crate::sysinfo::available() {
                 crate::sysinfo::draw(sys_out); // vignette bas-droite
+            }
+            if side_out < 0.35 {
+                crate::agenda::draw(now); // agenda bas-gauche
             }
         }
         crate::apps::draw(now); // appli plein écran OU panneau de choix

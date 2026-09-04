@@ -19,6 +19,7 @@
 extern crate alloc;
 
 mod ac97;
+mod agenda;
 mod apps;
 mod asti;
 mod ata;
@@ -182,6 +183,7 @@ pub extern "C" fn rust_main() -> ! {
     image::install_cube(); // palette 76..=255 = cube couleurs pour les images
     apps::install_palette(); // palette 41..=49 = applis plein écran
     sysinfo::install_palette(); // palette 50..=59 = vignette infos système
+    agenda::install_palette(); // palette 60..=63 = widget agenda
 
     serial_println!("[nothing-os] mode graphique : animation de demarrage");
     boot_anim::play();
