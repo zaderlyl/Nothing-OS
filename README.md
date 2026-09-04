@@ -292,8 +292,10 @@ make run LD=x86_64-elf-ld         # cross-binutils (macOS)
   `src/wav.rs` et `src/mp3.rs` (minimp3). Asti prend la personnalité
   « musique » pendant la lecture.
 - ✅ Applis plein écran (`src/apps.rs`) : `/app` → lanceur → VS Code /
-  Affinity / Discord (chat fonctionnel), Asti au-dessus avec l'humeur
-  de l'appli.
+  Affinity / Discord, Asti au-dessus avec l'humeur de l'appli.
+- ✅ Bureau distant (`src/remote.rs` + `bridge/`) : le **vrai** Discord du
+  Mac affiché et pilotable dans l'OS, via un pont qui passe les images et
+  les entrées par le partage 9p. Voir `bridge/README.md`.
 
 ## Prochaines étapes possibles
 
