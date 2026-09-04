@@ -24,6 +24,8 @@ AUDIODEV="${AUDIODEV:-coreaudio,id=snd}"
 
 bash opener.sh "$SHARE" > "$OPENER_LOG" 2>&1 &
 OPENER=$!
+bash sysinfo.sh "$SHARE" > /tmp/nothing-sysinfo.log 2>&1 &
+SYS=$!
 
 # Asti = compagnon macOS séparé, toujours au-dessus (pc-pet).
 PET_DIR="${PET_DIR:-$HOME/Documents/PERSO/programme perso/pc-pet}"
@@ -36,7 +38,7 @@ else
     echo "Asti (compagnon) introuvable : $PET_DIR — lance-le à la main si tu le veux" >&2
 fi
 
-cleanup() { kill $OPENER $QPID $PET 2>/dev/null || true; }
+cleanup() { kill $OPENER $SYS $QPID $PET 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
 "$QEMU" -kernel "$KERNEL" -vga std \

@@ -304,6 +304,8 @@ pub fn run(mut brain: asti::Brain) -> ! {
     let mut shelf_leave = -10.0_f32;
     let mut side_out = 0.0_f32; // 0 = cachée, 1 = visible
     let mut side_leave = -10.0_f32;
+    let mut sys_out = 0.0_f32; // vignette infos système (bas-droite)
+    let mut sys_leave = -10.0_f32;
     let mut last = time::now_secs();
     let mut click_latch = false;
     let mut drag: Option<shelf::Kind> = None; // friandise en cours de glissement
@@ -332,6 +334,7 @@ pub fn run(mut brain: asti::Brain) -> ! {
 
         mouse::poll();
         crate::ac97::poll(); // réalimente la carte son
+        crate::sysinfo::poll(now); // infos Mac (.nothingos-sys)
         let m = mouse::state();
 
         let pressed = m.left && !click_latch;
@@ -447,6 +450,17 @@ pub fn run(mut brain: asti::Brain) -> ! {
         side_out += (side_want - side_out) * (1.0 - libm::powf(0.5, dt * 9.0));
         side_out = side_out.clamp(0.0, 1.0);
 
+        // --- vignette infos système : souris au coin bas-droite ---
+        if !crate::apps::active()
+            && !crate::docview::active()
+            && crate::sysinfo::hot(m.x, m.y, sys_out)
+        {
+            sys_leave = now;
+        }
+        let sys_want = if now - sys_leave < 0.5 { 1.0 } else { 0.0 };
+        sys_out += (sys_want - sys_out) * (1.0 - libm::powf(0.5, dt * 10.0));
+        sys_out = sys_out.clamp(0.0, 1.0);
+
         // --- glisser-déposer d'une friandise / bouton info ---
         if pressed && shelf_out > 0.5 && drag.is_none() {
             if shelf::info_hit(m.x, m.y) {
@@ -486,6 +500,9 @@ pub fn run(mut brain: asti::Brain) -> ! {
             }
             wm.draw(now); // fenêtres
             crate::docview::draw(now); // panneaux de consultation
+            if crate::sysinfo::available() {
+                crate::sysinfo::draw(sys_out); // vignette bas-droite
+            }
         }
         crate::apps::draw(now); // appli plein écran OU panneau de choix
         if ASTI_IN_OS && !app_full && shelf_out > 0.03 && !crate::docview::active() {

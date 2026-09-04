@@ -44,6 +44,7 @@ mod port;
 mod rtc;
 mod serial;
 mod shelf;
+mod sysinfo;
 mod term;
 mod time;
 mod vga;
@@ -179,6 +180,7 @@ pub extern "C" fn rust_main() -> ! {
     home::install_palette();
     image::install_cube(); // palette 76..=255 = cube couleurs pour les images
     apps::install_palette(); // palette 41..=49 = applis plein écran
+    sysinfo::install_palette(); // palette 50..=59 = vignette infos système
 
     serial_println!("[nothing-os] mode graphique : animation de demarrage");
     boot_anim::play();
