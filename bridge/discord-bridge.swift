@@ -120,14 +120,26 @@ actor Loop {
     var frames = 0
     init(_ dir: String) { self.dir = dir }
 
-    var noPerm = 0
+    var askedOnce = false
+    var waitLogged = false
 
     func run() async {
         log("[bridge] demarrage — partage \(dir)")
-        if !CGPreflightScreenCaptureAccess() {
-            log("[bridge] demande de l'autorisation « Enregistrement de l'ecran »…")
-            _ = CGRequestScreenCaptureAccess() // ouvre la boite de dialogue macOS
+        // On attend l'autorisation SANS marteler SCShareableContent
+        // (chaque appel non autorisé relance la pop-up macOS).
+        while !CGPreflightScreenCaptureAccess() {
+            if !askedOnce {
+                askedOnce = true
+                log("[bridge] demande de l'autorisation « Enregistrement de l'ecran »…")
+                _ = CGRequestScreenCaptureAccess() // ouvre la boite UNE fois
+            } else if !waitLogged {
+                waitLogged = true
+                log("[bridge] en attente — Reglages ▸ Confidentialite ▸ Enregistrement de l'ecran ▸ coche « NothingBridge », puis QUITTE et relance ce pont")
+            }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
         }
+        log("[bridge] autorisation OK")
+
         while true {
             let t0 = Date()
             await step()
@@ -138,14 +150,10 @@ actor Loop {
 
     func step() async {
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
-            noPerm += 1
-            if noPerm == 1 || noPerm % 60 == 0 {
-                log("[bridge] pas d'acces ecran — Reglages ▸ Confidentialite ▸ Enregistrement de l'ecran ▸ coche NothingBridge, puis relance")
-            }
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            log("[bridge] SCShareableContent a echoue (autorisation revoquee ?) — QUITTE et relance")
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
             return
         }
-        noPerm = 0
         var win: SCWindow? = nil; var area: CGFloat = 0
         for w in content.windows {
             guard (w.owningApplication?.applicationName ?? "").contains("Discord"), w.windowLayer == 0 else { continue }

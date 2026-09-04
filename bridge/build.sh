@@ -1,17 +1,24 @@
 #!/bin/bash
-# Compile le pont et l'empaquette en .app — ScreenCaptureKit exige un
-# bundle pour capturer l'écran de façon fiable, et l'autorisation
-# « Enregistrement de l'écran » se rattache alors au bundle (elle survit
-# aux recompilations).
+# Compile le pont et l'empaquette en .app.
+#
+# ScreenCaptureKit ne capture de façon fiable que depuis un bundle, et
+# l'autorisation « Enregistrement de l'écran » se rattache au bundle.
+# ⚠️  Reconstruire l'app change sa signature → il faut re-cocher
+#     l'autorisation.  Ce script ne reconstruit donc QUE si la source a
+#     changé (forcer avec:  bridge/build.sh --force).
 set -e
 cd "$(dirname "$0")"
 
 APP="NothingBridge.app"
 BIN="$APP/Contents/MacOS/NothingBridge"
 
+if [ "$1" != "--force" ] && [ -x "$BIN" ] && [ "$BIN" -nt discord-bridge.swift ]; then
+    echo "à jour : $PWD/$APP  (bridge/build.sh --force pour reconstruire)"
+    exit 0
+fi
+
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
-
 swiftc -O discord-bridge.swift -o "$BIN"
 
 cat > "$APP/Contents/Info.plist" <<'EOF'
@@ -32,9 +39,7 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 </dict></plist>
 EOF
 
-# signature ad-hoc (stabilise l'identite pour TCC)
-codesign --force --deep -s - "$APP" 2>/dev/null || true
+codesign --force -s - "$APP" 2>/dev/null || true
 
-echo "OK : $PWD/$APP"
-echo "Lancer :  open $APP --args \"\$HOME/Documents\""
-echo "Log    :  ~/Library/Logs/nothing-bridge.log"
+echo "construit : $PWD/$APP"
+echo "→ lance :  bridge/run.sh"
