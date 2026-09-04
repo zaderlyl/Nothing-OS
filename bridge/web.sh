@@ -81,7 +81,11 @@ def browser(q):
         url = "https://" + q
     else:
         url = "https://www.google.com/search?q=" + q.replace(" ", "+")
-    subprocess.Popen(["open", url])
+    # Firefox si installé, sinon le navigateur par défaut du Mac
+    if os.path.isdir("/Applications/Firefox.app"):
+        subprocess.Popen(["open", "-a", "Firefox", url])
+    else:
+        subprocess.Popen(["open", url])
     return url
 
 

@@ -39,6 +39,7 @@ fn set_accent(app: App) {
         App::Discord => (88, 101, 242),
         App::Claude => (217, 119, 87),
         App::Spotify => (30, 215, 96),
+        App::Firefox => (255, 145, 0),
         App::None => (120, 200, 255),
     };
     fb::set_palette(A_ACC, r, g, b);
@@ -52,6 +53,7 @@ pub enum App {
     Discord,
     Claude,
     Spotify,
+    Firefox,
 }
 
 impl App {
@@ -62,6 +64,7 @@ impl App {
             App::Discord => "discord",
             App::Claude => "claude",
             App::Spotify => "spotify",
+            App::Firefox => "firefox",
             App::None => "",
         }
     }
@@ -72,6 +75,7 @@ impl App {
             App::Discord => "Discord",
             App::Claude => "Claude",
             App::Spotify => "Spotify",
+            App::Firefox => "Firefox",
             App::None => "",
         }
     }
@@ -84,12 +88,13 @@ struct Item {
     glyph: &'static [&'static str],
 }
 
-const ITEMS: [Item; 5] = [
+const ITEMS: [Item; 6] = [
     Item { app: App::VsCode, name: "VS Code", desc: "editeur de code", glyph: dots::CODE },
     Item { app: App::Affinity, name: "Affinity", desc: "dessin / design", glyph: dots::PALETTE },
     Item { app: App::Discord, name: "Discord", desc: "messagerie", glyph: dots::CHAT },
     Item { app: App::Claude, name: "Claude", desc: "assistant IA", glyph: dots::QUESTION },
     Item { app: App::Spotify, name: "Spotify", desc: "musique", glyph: dots::NOTE },
+    Item { app: App::Firefox, name: "Firefox", desc: "navigateur", glyph: dots::WEB },
 ];
 
 static mut LAUNCH_ON: bool = false; // panneau demandé
@@ -132,6 +137,8 @@ pub fn launch_named(name: &[u8]) -> bool {
         App::Claude
     } else if has(b"spotify") || has(b"musique") {
         App::Spotify
+    } else if has(b"firefox") || has(b"navigateur") || has(b"browser") {
+        App::Firefox
     } else {
         return false;
     };
@@ -219,6 +226,7 @@ pub fn mood() -> (Option<asti::Pose>, asti::Tint) {
         App::Affinity => (Some(asti::Pose::AppArt), asti::Tint::Web),
         App::Discord => (Some(asti::Pose::AppChat), asti::Tint::Chat),
         App::Spotify => (Some(asti::Pose::AppMusic), asti::Tint::Music),
+        App::Firefox => (Some(asti::Pose::AppArt), asti::Tint::Web),
         App::Claude => (Some(asti::Pose::AppChat), asti::Tint::Chat),
         App::None => (Some(asti::Pose::AppGit), asti::Tint::Git),
     }
@@ -259,8 +267,8 @@ pub fn on_click(mx: i32, my: i32) -> bool {
 // --- rendu --------------------------------------------------------
 
 const PANEL_W: i32 = 520;
-const ROW_H: i32 = 100;
-const LIST_Y: i32 = 548;
+const ROW_H: i32 = 88;
+const LIST_Y: i32 = 480; // laisse la place aux 6 applis avant le bas de l'écran
 
 pub fn draw(now: f32) {
     unsafe {
