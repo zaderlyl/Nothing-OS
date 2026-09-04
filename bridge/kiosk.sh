@@ -28,6 +28,8 @@ bash sysinfo.sh "$SHARE" > /tmp/nothing-sysinfo.log 2>&1 &
 SYS=$!
 python3 calendar.sh "$SHARE" > /tmp/nothing-calendar.log 2>&1 &
 CAL=$!
+python3 mail.sh "$SHARE" > /tmp/nothing-mail.log 2>&1 &
+MAIL=$!
 
 # Asti = compagnon macOS séparé, toujours au-dessus (pc-pet).
 PET_DIR="${PET_DIR:-$HOME/Documents/PERSO/programme perso/pc-pet}"
@@ -40,7 +42,7 @@ else
     echo "Asti (compagnon) introuvable : $PET_DIR — lance-le à la main si tu le veux" >&2
 fi
 
-cleanup() { kill $OPENER $SYS $CAL $QPID $PET 2>/dev/null || true; }
+cleanup() { kill $OPENER $SYS $CAL $MAIL $QPID $PET 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
 # -usb -device usb-tablet : pointeur ABSOLU (src/usb.rs). QEMU ne capture

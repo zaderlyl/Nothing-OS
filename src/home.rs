@@ -6,9 +6,11 @@
 //! souris frôle le bord. Asti est calé en haut à droite, toujours
 //! visible ; son étagère de friandises se déplie au survol.
 
-#![allow(dead_code)]
+#![allow(dead_code, static_mut_refs)]
 
 use core::sync::atomic::{AtomicU8, Ordering};
+
+use alloc::string::ToString;
 
 use crate::{asti, fb, font, kbd, mouse, rtc, shelf, time, win};
 
@@ -71,12 +73,9 @@ const TASKS: [(&str, bool); 6] = [
     ("Repondre a Lea", false),
     ("Backup du depot", true),
 ];
-const INFOS: [(&str, &str); 4] = [
-    ("Mail", "3 non lus"),
-    ("Agenda", "14h00 Reunion"),
-    ("Batterie", "82%"),
-    ("Systeme", "OK"),
-];
+// Y (dans la barre latérale) de la ligne « Mail » cliquable, calculé au
+// dessin. Sert à détecter le clic dans la boucle.
+static mut SIDEBAR_MAIL_Y: i32 = 0;
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
@@ -272,12 +271,21 @@ fn draw_sidebar(x0: i32) {
     fb::fill_rect(x0 + (SIDE_W - sep_w) / 2, y, sep_w, 2, PAL_DIVIDER);
     y += 28;
 
-    font::draw_str_scaled(x0 + PAD, y, "INFOS", PAL_HEADER, 2);
+    // --- MAIL (cliquable → liste des messages) ---
+    font::draw_str_scaled(x0 + PAD, y, "MAIL", PAL_HEADER, 2);
     y += 46;
-    for (k, v) in INFOS {
-        font::draw_str_scaled(x0 + PAD, y, k, PAL_TEXT_DIM, 2);
-        font::draw_str_scaled(x0 + PAD + 176, y, v, PAL_TEXT, 2);
-        y += 40;
+    let my0 = y;
+    if crate::mail::available() {
+        let n = crate::mail::unread();
+        let mut s = n.to_string();
+        s.push_str(" non lus");
+        font::draw_str_scaled(x0 + PAD, y, &s, PAL_ACCENT, 3);
+        font::draw_str_scaled(x0 + PAD, y + 40, "clique pour ouvrir", PAL_TEXT_DIM, 2);
+    } else {
+        font::draw_str_scaled(x0 + PAD, y, "connexion...", PAL_TEXT_DIM, 2);
+    }
+    unsafe {
+        SIDEBAR_MAIL_Y = my0;
     }
 
     // horloge en bas
@@ -336,6 +344,8 @@ pub fn run(mut brain: asti::Brain) -> ! {
         crate::ac97::poll(); // réalimente la carte son
         crate::sysinfo::poll(now); // infos Mac (.nothingos-sys)
         crate::agenda::poll(now); // agenda (.nothingos-cal)
+        crate::mail::poll(now); // boîte mail (.nothingos-mail)
+        crate::mail::update(dt);
         let m = mouse::state();
 
         let pressed = m.left && !click_latch;
@@ -347,16 +357,33 @@ pub fn run(mut brain: asti::Brain) -> ! {
         if scroll != 0 && crate::docview::active() {
             crate::docview::on_scroll(m.x, m.y, scroll);
         }
+        if scroll != 0 && crate::mail::active() {
+            crate::mail::on_scroll(m.x, m.y, scroll);
+        }
         let apps_took = pressed && crate::apps::active() && crate::apps::on_click(m.x, m.y);
+        // clic sur la ligne « Mail » de la barre latérale → ouvre la liste
+        if pressed && !apps_took && side_out > 0.5 && !crate::mail::active() {
+            let sx = lerp(-(SIDE_W as f32) - 4.0, 0.0, side_out) as i32;
+            let my0 = unsafe { SIDEBAR_MAIL_Y };
+            if m.x >= sx && m.x <= sx + SIDE_W && m.y >= my0 - 8 && m.y <= my0 + 60 {
+                crate::mail::open_list();
+            }
+        }
+        let mail_took = !apps_took
+            && pressed
+            && crate::mail::active()
+            && crate::mail::on_click(m.x, m.y);
         let dv_took = !apps_took
+            && !mail_took
             && pressed
             && crate::docview::active()
             && crate::docview::on_click(m.x, m.y);
 
         // --- fenêtres : la souris d'abord (focus / glisser / fermer) ---
-        let win_took_click = wm.on_mouse(m.x, m.y, m.left, pressed && !dv_took && !apps_took);
+        let win_took_click =
+            wm.on_mouse(m.x, m.y, m.left, pressed && !dv_took && !apps_took && !mail_took);
         // clic ailleurs (pas sur une fenêtre) → le clavier revient à la barre
-        if pressed && !dv_took && !apps_took && !win_took_click {
+        if pressed && !dv_took && !apps_took && !mail_took && !win_took_click {
             wm.blur();
         }
 
@@ -370,6 +397,8 @@ pub fn run(mut brain: asti::Brain) -> ! {
                 // Échap → ferme l'appli / la consultation, sinon barre
                 if crate::apps::active() {
                     crate::apps::close();
+                } else if crate::mail::active() {
+                    crate::mail::close();
                 } else if crate::docview::active() {
                     crate::docview::close_all();
                 }
@@ -504,9 +533,10 @@ pub fn run(mut brain: asti::Brain) -> ! {
             if crate::sysinfo::available() {
                 crate::sysinfo::draw(sys_out); // vignette bas-droite
             }
-            if side_out < 0.35 {
+            if side_out < 0.35 && !crate::mail::active() {
                 crate::agenda::draw(now); // agenda bas-gauche
             }
+            crate::mail::draw(now); // liste (droite) + lecteur (gauche)
         }
         crate::apps::draw(now); // appli plein écran OU panneau de choix
         if ASTI_IN_OS && !app_full && shelf_out > 0.03 && !crate::docview::active() {

@@ -37,6 +37,7 @@ mod hostfs;
 mod image;
 mod interrupts;
 mod kbd;
+mod mail;
 mod mouse;
 mod mp3;
 mod p9;
@@ -184,6 +185,7 @@ pub extern "C" fn rust_main() -> ! {
     apps::install_palette(); // palette 41..=49 = applis plein écran
     sysinfo::install_palette(); // palette 50..=59 = vignette infos système
     agenda::install_palette(); // palette 60..=63 = widget agenda
+    mail::install_palette(); // palette 46..=49 = boîte mail
 
     serial_println!("[nothing-os] mode graphique : animation de demarrage");
     boot_anim::play();
