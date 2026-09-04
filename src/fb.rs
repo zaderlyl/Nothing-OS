@@ -33,11 +33,6 @@ fn back() -> *mut u8 {
     &raw mut BACK as *mut u8
 }
 
-/// Accès direct au back-buffer (blits en masse, ex. `remote::draw`).
-pub fn back_mut() -> &'static mut [u8] {
-    unsafe { core::slice::from_raw_parts_mut(&raw mut BACK as *mut u8, WIDTH * HEIGHT) }
-}
-
 fn vbe_write(index: u16, value: u16) {
     unsafe {
         outw(VBE_INDEX, index);

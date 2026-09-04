@@ -335,10 +335,6 @@ pub fn run(mut brain: asti::Brain) -> ! {
         let scroll = mouse::take_scroll();
         crate::apps::update(now, dt);
         crate::docview::update(dt);
-        if crate::apps::running() {
-            let released = !m.left && click_latch;
-            crate::apps::feed_pointer(m.x, m.y, pressed, released, scroll);
-        }
         if scroll != 0 && crate::docview::active() {
             crate::docview::on_scroll(m.x, m.y, scroll);
         }
@@ -369,10 +365,6 @@ pub fn run(mut brain: asti::Brain) -> ! {
                     crate::docview::close_all();
                 }
                 wm.blur();
-                continue;
-            }
-            if crate::apps::running() {
-                crate::apps::on_key(c);
                 continue;
             }
             if wm.wants_keys() {

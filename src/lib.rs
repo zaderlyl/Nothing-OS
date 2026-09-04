@@ -39,7 +39,6 @@ mod mouse;
 mod mp3;
 mod p9;
 mod pci;
-mod remote;
 mod port;
 mod rtc;
 mod serial;
