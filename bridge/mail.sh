@@ -23,10 +23,19 @@ REFRESH = 25
 last_cmd = ""
 
 
+_PUNCT = {"’": "'", "‘": "'", "“": '"', "”": '"',
+         "–": "-", "—": "-", "…": "...", " ": " ",
+         " ": " ", "‹": "<", "›": ">", "•": "-"}
+
+
 def ascii_only(s):
-    s = unicodedata.normalize("NFKD", s or "")
+    s = s or ""
+    for k, v in _PUNCT.items():
+        s = s.replace(k, v)
+    s = unicodedata.normalize("NFKD", s)
     s = "".join(c for c in s if not unicodedata.combining(c))
-    return s.encode("ascii", "replace").decode("ascii")
+    # jette les caractères non-ascii restants (emoji…) au lieu de "?"
+    return s.encode("ascii", "ignore").decode("ascii")
 
 
 def osa(script):

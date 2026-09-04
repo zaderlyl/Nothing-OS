@@ -19,9 +19,12 @@ import os, sys, time, calendar, unicodedata, urllib.request, ssl, re
 
 def ascii_only(s):
     # le noyau n'affiche que l'ASCII : on translittère les accents
+    for k, v in {"’": "'", "‘": "'", "“": '"', "”": '"', "–": "-",
+                 "—": "-", "…": "...", " ": " ", " ": " "}.items():
+        s = s.replace(k, v)
     s = unicodedata.normalize("NFKD", s)
     s = "".join(c for c in s if not unicodedata.combining(c))
-    return s.encode("ascii", "replace").decode("ascii")
+    return s.encode("ascii", "ignore").decode("ascii")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SHARE = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/Documents")

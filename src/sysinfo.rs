@@ -122,12 +122,13 @@ pub fn rect(slide: f32) -> (i32, i32, i32, i32) {
 pub fn hot(mx: i32, my: i32, slide: f32) -> bool {
     let w = fb::WIDTH as i32;
     let h = fb::HEIGHT as i32;
-    if mx > w - 210 && my > h - 64 {
-        return true; // coin bas-droite
+    // zone de déclenchement généreuse dans le coin bas-droite
+    if mx > w - 460 && my > h - 150 {
+        return true;
     }
-    if slide > 0.1 {
+    if slide > 0.05 {
         let (x, y, pw, ph) = rect(slide);
-        return mx >= x - 6 && mx <= x + pw + 6 && my >= y - 6 && my <= y + ph + 6;
+        return mx >= x - 40 && mx <= x + pw + 40 && my >= y - 40 && my <= y + ph + 40;
     }
     false
 }

@@ -57,7 +57,8 @@ static mut OPEN_ID: i64 = 0;
 static mut WANT_LIST: bool = false;
 static mut LIST_OUT: f32 = 0.0;
 static mut READER_OUT: f32 = 0.0;
-static mut SCROLL: i32 = 0;
+static mut LIST_SCROLL: i32 = 0;
+static mut READER_SCROLL: i32 = 0;
 static mut SEQ: u32 = 0;
 static mut LAST: f32 = -100.0;
 static mut GOT: bool = false;
@@ -75,7 +76,7 @@ pub fn active() -> bool {
 pub fn open_list() {
     unsafe {
         WANT_LIST = true;
-        SCROLL = 0;
+        LIST_SCROLL = 0;
     }
 }
 pub fn close() {
@@ -157,6 +158,14 @@ pub fn poll(now: f32) {
                         }
                     }
                     if b.id == OPEN_ID {
+                        // ré-enveloppe le corps à la largeur du lecteur,
+                        // sans jamais couper un mot
+                        let cols = reader_cols();
+                        let mut wrapped: Vec<String> = Vec::new();
+                        for raw in b.lines.iter() {
+                            wrap_into(raw, cols, &mut wrapped);
+                        }
+                        b.lines = wrapped;
                         BODY = Some(b);
                     }
                 }
@@ -169,19 +178,21 @@ pub fn update(dt: f32) {
     unsafe {
         let lt = if WANT_LIST || OPEN_ID != 0 { 1.0 } else { 0.0 };
         let rt = if OPEN_ID != 0 { 1.0 } else { 0.0 };
-        LIST_OUT += (lt - LIST_OUT) * (1.0 - libm::powf(0.5, dt * 12.0));
+        // vitesses différentes → les deux panneaux ne bougent pas en bloc
+        LIST_OUT += (lt - LIST_OUT) * (1.0 - libm::powf(0.5, dt * 9.0));
         READER_OUT += (rt - READER_OUT) * (1.0 - libm::powf(0.5, dt * 12.0));
         LIST_OUT = LIST_OUT.clamp(0.0, 1.0);
         READER_OUT = READER_OUT.clamp(0.0, 1.0);
     }
 }
 
-pub fn on_scroll(_mx: i32, _my: i32, dy: i32) {
+pub fn on_scroll(mx: i32, _my: i32, dy: i32) {
     unsafe {
-        if READER_OUT > 0.5 {
-            SCROLL = (SCROLL - dy * 3).max(0);
+        // le lecteur (gauche) et la liste (droite) défilent indépendamment
+        if READER_OUT > 0.5 && mx < reader_x() + RW {
+            READER_SCROLL = (READER_SCROLL - dy * 3).max(0);
         } else if LIST_OUT > 0.5 {
-            SCROLL = (SCROLL - dy * 2).max(0);
+            LIST_SCROLL = (LIST_SCROLL - dy * 2).max(0);
         }
     }
 }
@@ -236,12 +247,12 @@ pub fn on_click(mx: i32, my: i32) -> bool {
         if LIST_OUT > 0.5 {
             let lx = list_x();
             if mx >= lx {
-                let idx = (my - LIST_TOP + SCROLL) / ROW;
+                let idx = (my - LIST_TOP + LIST_SCROLL) / ROW;
                 if idx >= 0 && (idx as usize) < ITEMS.len() {
                     let id = ITEMS[idx as usize].id;
                     OPEN_ID = id;
                     BODY = None;
-                    SCROLL = 0;
+                    READER_SCROLL = 0;
                     cmd("open", id);
                 }
                 return true;
@@ -270,7 +281,7 @@ pub fn draw(now: f32) {
             hdr.push_str(" non lus");
             font::draw_str_scaled(x + 110, 22, &hdr, ACCENT, 2);
 
-            let mut y = LIST_TOP - SCROLL;
+            let mut y = LIST_TOP - LIST_SCROLL;
             for m in ITEMS.iter() {
                 if y > -ROW && y < h {
                     if OPEN_ID == m.id {
@@ -303,15 +314,24 @@ pub fn draw(now: f32) {
                     font::draw_str_scaled(x + 32, 26, &b.from, ACCENT, 2);
                     let dw = font::width_scaled(&b.date, 2);
                     font::draw_str_scaled(x + RW - 32 - dw, 26, &b.date, DIM, 2);
-                    fit(x + 32, 58, x + RW - 32, &b.subject, TXT);
-                    fb::fill_rect(x + 32, 92, RW - 64, 1, LINE);
+                    // sujet : enveloppé (jamais coupé), 1 ou 2 lignes
+                    let cols = reader_cols();
+                    let mut subj: Vec<String> = Vec::new();
+                    wrap_into(&b.subject, cols, &mut subj);
+                    let mut sy = 58;
+                    for l in subj.iter().take(2) {
+                        font::draw_str_scaled(x + 32, sy, l, TXT, 2);
+                        sy += 26;
+                    }
+                    let hdr_h = sy + 6;
+                    fb::fill_rect(x + 32, hdr_h, RW - 64, 1, LINE);
 
-                    let top = 112;
+                    let top = hdr_h + 20;
                     let bot = h - 76;
-                    let mut ly = top - SCROLL;
+                    let mut ly = top - READER_SCROLL;
                     for ln in b.lines.iter() {
                         if ly > top - 24 && ly < bot {
-                            fit(x + 32, ly, x + RW - 28, ln, TXT);
+                            font::draw_str_scaled(x + 32, ly, ln, TXT, 2);
                         }
                         ly += 24;
                     }
@@ -332,15 +352,59 @@ pub fn draw(now: f32) {
     }
 }
 
+/// Largeur en caractères du corps du lecteur.
+fn reader_cols() -> usize {
+    let cw = font::width_scaled("m", 2).max(1);
+    (((RW - 60) / cw) as usize).max(10)
+}
+
+/// Découpe `s` en lignes d'au plus `cols` caractères, aux espaces
+/// (jamais au milieu d'un mot ; un mot trop long est laissé tel quel).
+fn wrap_into(s: &str, cols: usize, out: &mut Vec<String>) {
+    if s.is_empty() {
+        out.push(String::new());
+        return;
+    }
+    let mut line = String::new();
+    for word in s.split(' ') {
+        if line.is_empty() {
+            line.push_str(word);
+        } else if line.chars().count() + 1 + word.chars().count() <= cols {
+            line.push(' ');
+            line.push_str(word);
+        } else {
+            out.push(core::mem::take(&mut line));
+            line.push_str(word);
+        }
+        // mot unique plus long qu'une ligne : on le laisse déborder (pas
+        // de coupe), la ligne suivante repart proprement
+        if line.chars().count() > cols {
+            out.push(core::mem::take(&mut line));
+        }
+    }
+    if !line.is_empty() {
+        out.push(line);
+    }
+}
+
+/// Tronque `s` à la largeur dispo en coupant au dernier espace + « … ».
 fn fit(x: i32, y: i32, maxx: i32, s: &str, col: u8) {
     let avail = maxx - x;
+    if avail <= 0 {
+        return;
+    }
     if font::width_scaled(s, 2) <= avail {
         font::draw_str_scaled(x, y, s, col, 2);
         return;
     }
     let cw = font::width_scaled("m", 2).max(1);
-    let n = ((avail / cw) as usize).saturating_sub(1);
-    let mut t: String = s.chars().take(n).collect();
-    t.push('.');
+    let n = ((avail / cw) as usize).saturating_sub(2).max(1);
+    let cut: String = s.chars().take(n).collect();
+    let t = match cut.rfind(' ') {
+        Some(i) if i > n / 2 => &cut[..i],
+        _ => cut.as_str(),
+    };
+    let mut t = t.to_string();
+    t.push_str("...");
     font::draw_str_scaled(x, y, &t, col, 2);
 }

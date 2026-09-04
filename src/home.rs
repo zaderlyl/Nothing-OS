@@ -247,7 +247,7 @@ fn app_mood(app: win::App) -> (Option<asti::Pose>, asti::Tint) {
 // Barre latérale (glisse depuis la gauche).
 // ---------------------------------------------------------------------
 
-fn draw_sidebar(x0: i32) {
+fn draw_sidebar(x0: i32, now: f32) {
     fb::fill_rect(x0, 0, SIDE_W, H, PAL_SIDE);
     fb::fill_rect(x0 + SIDE_W, 0, 2, H, PAL_DIVIDER);
 
@@ -273,20 +273,36 @@ fn draw_sidebar(x0: i32) {
 
     // --- MAIL (cliquable → liste des messages) ---
     font::draw_str_scaled(x0 + PAD, y, "MAIL", PAL_HEADER, 2);
-    y += 46;
+    y += 44;
     let my0 = y;
     if crate::mail::available() {
         let n = crate::mail::unread();
         let mut s = n.to_string();
         s.push_str(" non lus");
         font::draw_str_scaled(x0 + PAD, y, &s, PAL_ACCENT, 3);
-        font::draw_str_scaled(x0 + PAD, y + 40, "clique pour ouvrir", PAL_TEXT_DIM, 2);
+        y += 44;
     } else {
         font::draw_str_scaled(x0 + PAD, y, "connexion...", PAL_TEXT_DIM, 2);
+        y += 40;
     }
     unsafe {
         SIDEBAR_MAIL_Y = my0;
     }
+
+    // --- AGENDA (sous les mails) ---
+    y += 30;
+    fb::fill_rect(x0 + (SIDE_W - sep_w) / 2, y - 18, sep_w, 2, PAL_DIVIDER);
+    y = crate::agenda::draw_sidebar(
+        x0 + PAD,
+        y,
+        SIDE_W - PAD * 2,
+        now,
+        PAL_HEADER,
+        PAL_TEXT,
+        PAL_TEXT_DIM,
+        PAL_ACCENT,
+    );
+    let _ = y;
 
     // horloge en bas
     let t = rtc::now();
@@ -526,15 +542,12 @@ pub fn run(mut brain: asti::Brain) -> ! {
         if !app_full {
             draw_hero(now, input_str);
             if side_out > 0.01 {
-                draw_sidebar(lerp(-(SIDE_W as f32) - 4.0, 0.0, side_out) as i32);
+                draw_sidebar(lerp(-(SIDE_W as f32) - 4.0, 0.0, side_out) as i32, now);
             }
             wm.draw(now); // fenêtres
             crate::docview::draw(now); // panneaux de consultation
             if crate::sysinfo::available() {
                 crate::sysinfo::draw(sys_out); // vignette bas-droite
-            }
-            if side_out < 0.35 && !crate::mail::active() {
-                crate::agenda::draw(now); // agenda bas-gauche
             }
             crate::mail::draw(now); // liste (droite) + lecteur (gauche)
         }

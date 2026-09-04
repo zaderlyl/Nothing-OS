@@ -129,6 +129,67 @@ const MARGIN: i32 = 28;
 const ROW: i32 = 60;
 const SHOWN: usize = 3;
 
+/// Rendu compact dans la barre latérale (sous « MAIL »), style discret.
+/// `col_txt` / `col_dim` / `col_accent` = palette du bureau.
+pub fn draw_sidebar(
+    x0: i32,
+    mut y: i32,
+    w: i32,
+    scene_now: f32,
+    col_head: u8,
+    col_txt: u8,
+    col_dim: u8,
+    col_accent: u8,
+) -> i32 {
+    unsafe {
+        font::draw_str_scaled(x0, y, "AGENDA", col_head, 2);
+        y += 40;
+        if !available() {
+            font::draw_str_scaled(x0, y, "chargement...", col_dim, 2);
+            return y + 36;
+        }
+        let now_ep = epoch_now(scene_now);
+        for (i, ev) in EVS.iter().take(4).enumerate() {
+            let first = i == 0;
+            font::draw_str_scaled(x0, y, &ev.when, if first { col_accent } else { col_dim }, 2);
+            if first {
+                if let Some(cd) = countdown(ev, now_ep) {
+                    let cw = font::width_scaled(&cd, 2);
+                    font::draw_str_scaled(x0 + w - cw, y, &cd, col_txt, 2);
+                }
+            }
+            let maxx = x0 + w;
+            let tc = if first { col_txt } else { col_dim };
+            let mut line = ev.summ.clone();
+            if !ev.loc.is_empty() {
+                line.push_str("  ");
+                line.push_str(&ev.loc);
+            }
+            trunc(x0, y + 24, maxx, &line, tc);
+            y += 60;
+        }
+        y
+    }
+}
+
+fn trunc(x: i32, y: i32, maxx: i32, s: &str, col: u8) {
+    let avail = maxx - x;
+    if font::width_scaled(s, 2) <= avail {
+        font::draw_str_scaled(x, y, s, col, 2);
+        return;
+    }
+    let cw = font::width_scaled("m", 2).max(1);
+    let n = ((avail / cw) as usize).saturating_sub(2).max(1);
+    let cut: String = s.chars().take(n).collect();
+    let t = match cut.rfind(' ') {
+        Some(i) if i > n / 2 => cut[..i].to_string(),
+        _ => cut,
+    };
+    let mut t = t;
+    t.push_str("...");
+    font::draw_str_scaled(x, y, &t, col, 2);
+}
+
 pub fn draw(scene_now: f32) {
     unsafe {
         if !available() {
