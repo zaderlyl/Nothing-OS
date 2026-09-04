@@ -82,22 +82,37 @@ func pumpInput(_ dir: String, _ winRect: CGRect, _ pid: pid_t) {
     let sx = winRect.width / CGFloat(FW), sy = winRect.height / CGFloat(FH)
     func scr(_ fx: Int, _ fy: Int) -> CGPoint { CGPoint(x: winRect.origin.x + CGFloat(fx)*sx, y: winRect.origin.y + CGFloat(fy)*sy) }
     let src = CGEventSource(stateID: .hidSystemState)
+    // On envoie les événements DIRECTEMENT au process Discord (postToPid) :
+    // le curseur réel du Mac ne bouge pas, et un clic hors fenêtre dans
+    // l'OS ne « sort » plus de la page.
+    func send(_ e: CGEvent?) {
+        guard let e = e else { return }
+        if pid != 0 { e.postToPid(pid) } else { e.post(tap: .cghidEventTap) }
+    }
     for _ in 0..<count {
         guard p < d.count else { break }
         let t = d[p]; p += 1
         switch t {
         case 0x4d:
             let pt = scr(r16(p), r16(p+2)); p += 4
-            CGEvent(mouseEventSource: src, mouseType: .mouseMoved, mouseCursorPosition: pt, mouseButton: .left)?.post(tap: .cghidEventTap)
+            send(CGEvent(mouseEventSource: src, mouseType: .mouseMoved, mouseCursorPosition: pt, mouseButton: .left))
         case 0x44, 0x55:
             let btn = d[p]; let pt = scr(r16(p+1), r16(p+3)); p += 5
             let down = t == 0x44
+            // un mouseMoved préalable pour que le moteur de rendu de Discord
+            // place le curseur sur la bonne cible avant le clic
+            if down {
+                send(CGEvent(mouseEventSource: src, mouseType: .mouseMoved, mouseCursorPosition: pt, mouseButton: .left))
+            }
             let mt: CGEventType = btn == 1 ? (down ? .rightMouseDown : .rightMouseUp) : (down ? .leftMouseDown : .leftMouseUp)
-            CGEvent(mouseEventSource: src, mouseType: mt, mouseCursorPosition: pt, mouseButton: btn == 1 ? .right : .left)?.post(tap: .cghidEventTap)
+            let e = CGEvent(mouseEventSource: src, mouseType: mt, mouseCursorPosition: pt, mouseButton: btn == 1 ? .right : .left)
+            e?.setIntegerValueField(.mouseEventClickState, value: 1)
+            send(e)
         case 0x57:
             let dy = Int8(bitPattern: d[p]); let pt = scr(r16(p+1), r16(p+3)); p += 5
             let e = CGEvent(scrollWheelEvent2Source: src, units: .line, wheelCount: 1, wheel1: Int32(dy), wheel2: 0, wheel3: 0)
-            e?.location = pt; e?.post(tap: .cghidEventTap)
+            e?.location = pt
+            send(e)
         case 0x46:
             forceFull = true
         case 0x4b:
@@ -149,7 +164,10 @@ final class Cap: NSObject, SCStreamOutput, SCStreamDelegate {
         // (on ne rappelle qu'après 3 s, donc pas de boucle de pop-up).
         let content: SCShareableContent
         do {
-            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            // onScreenWindowsOnly: false → on trouve Discord même quand QEMU
+            // est passé en plein écran (QEMU migre sur son propre Space macOS
+            // et « cache » Discord ; true faisait boucler restart() → crash).
+            content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         } catch {
             if !askedOnce {
                 askedOnce = true
@@ -220,16 +238,19 @@ final class Cap: NSObject, SCStreamOutput, SCStreamDelegate {
             if frames % 300 == 0 { log("[bridge] \(frames) images") }
             emit(cur: cur)
         } else {
-            // trame « idle » : rien n'a changé → on ré-émet le dernier
-            // état (garde le noyau « live » et honore les keyframes)
-            if let p = prev { frames += 1; emit(cur: p) }
+            // trame « idle » : rien n'a changé. On ne ré-écrit frame.bin QUE
+            // si le noyau réclame une trame complète — sinon on laisse le
+            // fichier tel quel (le noyau garde son « live » via mtime/seq).
+            if let p = prev, forceFull { emit(cur: p) }
         }
 
         pumpInput(dir, winRect, discordPid())
     }
 
     func emit(cur: [UInt8]) {
-        let full = prev == nil || forceFull || seq % 30 == 0
+        // keyframe seulement à l'ouverture / sur demande / rarement (~toutes
+        // les 12 s à 12 i/s) : une keyframe pèse ~130 Ko, trop lourde en 9p.
+        let full = prev == nil || forceFull || seq % 150 == 0
         forceFull = false
         seq &+= 1
         writeFrame(dir, seq: seq, cur: cur, prev: prev, full: full)

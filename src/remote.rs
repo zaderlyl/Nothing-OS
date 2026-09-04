@@ -31,6 +31,13 @@ static mut GOT_FULL: bool = false;
 static mut ASK_AT: f32 = -100.0;
 static mut DIAG: u32 = 0;
 static mut ASKS: u32 = 0;
+static mut POLLED_AT: f32 = -100.0;
+static mut MOVED_AT: f32 = -100.0;
+// table de colonnes source précalculée pour draw() (évite une division
+// flottante par pixel) — reconstruite quand la géométrie change
+static mut SX_TAB: Vec<u16> = Vec::new();
+static mut TAB_W: usize = 0;
+static mut TAB_S: f32 = 0.0;
 
 fn u16le(d: &[u8], o: usize) -> usize {
     (d[o] as usize) | ((d[o + 1] as usize) << 8)
@@ -48,6 +55,12 @@ pub fn live() -> bool {
 pub fn poll(now: f32) {
     unsafe {
         NOW = now;
+        // on ne relit le partage 9p qu'à ~12 Hz : lire frame.bin à chaque
+        // image (30–60 fps) sature le lien 9p et fait « ramer » l'affichage.
+        if now - POLLED_AT < 0.08 {
+            return;
+        }
+        POLLED_AT = now;
         match p9::read_file(FRAME_PATH) {
             Some(d) if d.len() >= 15 && &d[0..4] == b"NOSF" => {
                 let seq = u32le(&d, 4);
@@ -165,23 +178,41 @@ fn layout() -> (i32, i32, f32) {
 
 pub fn draw() {
     unsafe {
-        if FW == 0 {
+        if FW == 0 || BUF.is_empty() {
             return;
         }
         fb::clear(0);
         let (ox, oy, s) = layout();
-        let dw = (FW as f32 * s) as i32;
-        let dh = (FH as f32 * s) as i32;
+        let dw = (FW as f32 * s) as usize;
+        let dh = (FH as f32 * s) as usize;
+
+        // (re)construit la table des colonnes source si la géométrie a bougé
+        if TAB_W != dw || TAB_S != s {
+            TAB_W = dw;
+            TAB_S = s;
+            SX_TAB = alloc::vec![0u16; dw];
+            for x in 0..dw {
+                SX_TAB[x] = ((x as f32 / s) as usize).min(FW - 1) as u16;
+            }
+        }
+
+        let fbw = fb::WIDTH as usize;
+        let fbh = fb::HEIGHT as usize;
+        let buf = fb::back_mut();
         for y in 0..dh {
-            let sy = ((y as f32 / s) as usize).min(FH - 1);
-            let srow = sy * FW;
-            let drow_y = oy + y;
-            if drow_y < 0 || drow_y >= fb::HEIGHT as i32 {
+            let dy = oy + y as i32;
+            if dy < 0 || dy as usize >= fbh {
                 continue;
             }
+            let sy = ((y as f32 / s) as usize).min(FH - 1);
+            let srow = sy * FW;
+            let drow = dy as usize * fbw;
             for x in 0..dw {
-                let sx = ((x as f32 / s) as usize).min(FW - 1);
-                fb::put(ox + x, drow_y, BUF[srow + sx]);
+                let dx = ox + x as i32;
+                if dx < 0 || dx as usize >= fbw {
+                    continue;
+                }
+                buf[drow + dx as usize] = BUF[srow + SX_TAB[x] as usize];
             }
         }
     }
@@ -213,9 +244,17 @@ fn to_frame(mx: i32, my: i32) -> Option<(u16, u16)> {
 
 pub fn feed_move(mx: i32, my: i32) {
     unsafe {
-        if (mx - LAST_MX).abs() + (my - LAST_MY).abs() < 3 {
+        // au repos on ne suit pas la souris en continu (ça inondait input.bin
+        // en 9p → latence). On n'envoie un « M » qu'au max ~15 fois/s et
+        // seulement s'il a bougé nettement — le vrai curseur Mac ne bouge
+        // plus (le pont route via postToPid), donc le survol reste discret.
+        if (mx - LAST_MX).abs() + (my - LAST_MY).abs() < 4 {
             return;
         }
+        if NOW - MOVED_AT < 0.06 {
+            return;
+        }
+        MOVED_AT = NOW;
         LAST_MX = mx;
         LAST_MY = my;
     }
