@@ -14,3 +14,4 @@ bridge/calendar.local
 bridge/mail-pins.tsv
 bridge/websearch.env
 __pycache__/
+bridge/websearch-quota.json

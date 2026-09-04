@@ -27,6 +27,7 @@ ANS = os.path.join(SHARE, ".nothingos-web-answer")
 RESULTS = os.path.join(SHARE, ".nothingos-web-results")
 ARTICLE = os.path.join(SHARE, ".nothingos-web-article")
 CONFIG = os.path.join(HERE, "websearch.env")
+QUOTA_FILE = os.path.join(HERE, "websearch-quota.json")
 
 QWORDS = ("qui", "que", "quoi", "quel", "quelle", "quels", "quelles", "quand",
           "comment", "pourquoi", "combien", "ou", "est-ce", "qu'est", "c'est",
@@ -34,6 +35,49 @@ QWORDS = ("qui", "que", "quoi", "quel", "quelle", "quels", "quelles", "quand",
           "how", "which", "is", "are", "does", "do", "can")
 
 MIN_WORDS = 80  # sous ce seuil, un article est jugé "pas lisible nativement"
+
+# Sécurité anti-dépassement : Google Custom Search offre 100 requêtes/jour
+# gratuites. On s'arrête à DAILY_CAP (marge de sécurité) et on NE FAIT
+# JAMAIS l'appel au-delà — donc aucun risque de facturation à cause de ce
+# script, quoi qu'il arrive côté Google.
+DAILY_CAP = 90
+quota_notified_today = False
+
+
+def today():
+    return time.strftime("%Y-%m-%d", time.localtime())
+
+
+def load_quota():
+    try:
+        d = json.load(open(QUOTA_FILE))
+        if d.get("date") == today():
+            return d
+    except Exception:
+        pass
+    return {"date": today(), "count": 0, "notified": False}
+
+
+def bump_quota():
+    d = load_quota()
+    d["count"] += 1
+    tmp = QUOTA_FILE + ".tmp"
+    json.dump(d, open(tmp, "w"))
+    os.replace(tmp, QUOTA_FILE)
+    return d["count"]
+
+
+def quota_left():
+    d = load_quota()
+    return max(0, DAILY_CAP - d["count"])
+
+
+def mark_notified():
+    d = load_quota()
+    d["notified"] = True
+    tmp = QUOTA_FILE + ".tmp"
+    json.dump(d, open(tmp, "w"))
+    os.replace(tmp, QUOTA_FILE)
 
 
 def strip_accents(s):
@@ -123,22 +167,36 @@ def wiki_answer(q):
 
 
 def google_search(q):
+    """Renvoie (resultats, quota_juste_atteint) ; resultats=None si pas de
+    clé, erreur API, OU quota du jour déjà épuisé (on n'appelle alors
+    JAMAIS Google — sécurité anti-dépassement)."""
     cfg = load_config()
     key, cx = cfg.get("GOOGLE_CSE_KEY"), cfg.get("GOOGLE_CSE_CX")
     if not key or not cx:
-        return None
+        return None, False
+
+    if quota_left() <= 0:
+        d = load_quota()
+        just_now = not d.get("notified", False)
+        if just_now:
+            mark_notified()
+        sys.stderr.write(f"[web] quota gratuit atteint ({DAILY_CAP}/jour) — pas d'appel Google\n")
+        return None, just_now
+
     import urllib.parse
     url = "https://www.googleapis.com/customsearch/v1?" + urllib.parse.urlencode(
         {"key": key, "cx": cx, "q": q, "num": 8})
     d = curl_json(url)
+    n = bump_quota()
+    sys.stderr.write(f"[web] Google CSE: {n}/{DAILY_CAP} aujourd'hui\n")
     if not d:
-        return None
+        return None, False
     if "error" in d:
         sys.stderr.write(f"[web] Google CSE: {d['error'].get('message','?')}\n")
-        return None
+        return None, False
     items = d.get("items", [])
     return [(it.get("title", ""), it.get("link", ""), it.get("snippet", ""))
-            for it in items[:8]]
+            for it in items[:8]], False
 
 
 # --- extraction « lisible » (sans dépendance externe) -------------------
@@ -261,7 +319,7 @@ def handle_search(query):
             sys.stderr.write(f"[web] reponse: {title}\n")
             return
 
-    results = google_search(query)
+    results, quota_just_hit = google_search(query)
     if results:
         lines = [f"q={ascii_only(query)}"]
         for title, link, snippet in results:
@@ -272,7 +330,14 @@ def handle_search(query):
         sys.stderr.write(f"[web] {len(results)} resultats: {query}\n")
         return
 
-    # ni Wikipédia ni Google (pas de clé) -> navigateur direct, comme avant
+    if quota_just_hit:
+        url = "https://www.google.com/search?q=" + query.replace(" ", "+")
+        open_in_firefox(url)
+        write(ANS, f"q={ascii_only(query)}\nquota\n---\n{url}\n")
+        return
+
+    # ni Wikipédia ni Google (pas de clé, quota déjà épuisé, ou erreur API)
+    # -> navigateur direct, comme avant
     url = ("https://www.google.com/search?q=" + query.replace(" ", "+"))
     open_in_firefox(url)
     write(ANS, f"q={ascii_only(query)}\nopen\n---\n{url}\n")

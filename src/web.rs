@@ -173,6 +173,9 @@ unsafe fn parse_answer(t: &str) {
         } else if ln == "open" {
             STATE = 3;
             return;
+        } else if ln == "quota" {
+            STATE = 6;
+            return;
         }
     }
     while LINES.first().map(|s| s.is_empty()).unwrap_or(false) {
@@ -266,6 +269,10 @@ unsafe fn draw_answer(x: i32, y: i32, w: i32, now: f32) {
     let text: Vec<String> = match STATE {
         1 => alloc::vec!["recherche...".to_string()],
         3 => alloc::vec!["pas de reponse directe - ouvert dans Firefox".to_string()],
+        6 => alloc::vec![
+            "limite gratuite Google atteinte pour aujourd'hui".to_string(),
+            "(reprend demain) - recherche ouverte dans Firefox".to_string(),
+        ],
         _ => {
             let cols = ((w - 72) / font::width_scaled("m", 2).max(1)) as usize;
             let mut out: Vec<String> = Vec::new();
