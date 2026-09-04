@@ -174,6 +174,7 @@ fn launch(app: App) {
     set_accent(app);
     if app == App::Discord {
         discord_init();
+        crate::remote::request_keyframe(); // au cas où le pont Mac tourne
     }
     crate::serial_println!("[apps] lancement {:?}", app as u8);
 }
@@ -200,17 +201,47 @@ pub fn mood() -> (Option<asti::Pose>, asti::Tint) {
     }
 }
 
-pub fn update(dt: f32) {
+pub fn update(now: f32, dt: f32) {
     unsafe {
         let target = if LAUNCH_ON { 1.0 } else { 0.0 };
         LAUNCH_OUT += (target - LAUNCH_OUT) * (1.0 - libm::powf(0.5, dt * 12.0));
         LAUNCH_OUT = LAUNCH_OUT.clamp(0.0, 1.0);
+    }
+    // pont « bureau distant » : on lit les trames dès qu'une appli
+    // distante peut être demandée
+    crate::remote::poll(now);
+}
+
+/// Discord affiché via le vrai client Mac (pont) ?
+pub fn discord_remote() -> bool {
+    unsafe { RUNNING == App::Discord && crate::remote::live() }
+}
+
+/// Souris de l'appli distante (appelé chaque image quand une appli tourne).
+pub fn feed_pointer(mx: i32, my: i32, pressed: bool, released: bool, wheel: i32) {
+    if !discord_remote() {
+        return;
+    }
+    crate::remote::feed_move(mx, my);
+    if pressed {
+        crate::remote::feed_button(mx, my, false, true);
+    }
+    if released {
+        crate::remote::feed_button(mx, my, false, false);
+    }
+    if wheel != 0 {
+        crate::remote::feed_wheel(mx, my, wheel);
     }
 }
 
 /// Touche pour l'appli en cours (Discord : saisie). Renvoie `true` si
 /// consommé.
 pub fn on_key(c: u8) -> bool {
+    if discord_remote() {
+        crate::remote::feed_key(c, true);
+        crate::remote::feed_key(c, false);
+        return true;
+    }
     unsafe {
         if RUNNING == App::Discord {
             match c {
@@ -254,7 +285,10 @@ pub fn on_click(mx: i32, my: i32) -> bool {
             return true;
         }
         if RUNNING == App::Discord {
-            // barre latérale : changer de salon
+            if crate::remote::live() {
+                return true; // géré par feed_pointer
+            }
+            // maquette : barre latérale → changer de salon
             if mx < DC_SIDE {
                 let i = (my - 96) / 52;
                 if i >= 0 && (i as usize) < CHANS.len() {
@@ -278,7 +312,13 @@ pub fn draw(now: f32) {
         match RUNNING {
             App::VsCode => draw_vscode(),
             App::Affinity => draw_affinity(now),
-            App::Discord => draw_discord(now),
+            App::Discord => {
+                if crate::remote::live() {
+                    crate::remote::draw();
+                } else {
+                    draw_discord(now);
+                }
+            }
             App::None => {}
         }
         if LAUNCH_OUT > 0.01 {
