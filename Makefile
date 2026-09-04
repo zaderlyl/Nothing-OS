@@ -55,6 +55,10 @@ DISK       := nothingos.img
 # `-rtc base=localtime` : le CMOS montre l'heure LOCALE du Mac (sinon
 # QEMU met l'UTC et l'horloge de l'OS est décalée). src/rtc.rs lit ça.
 QEMU_FLAGS := -m 1G -no-reboot -no-shutdown -rtc base=localtime
+# tablette USB = pointeur ABSOLU (pilote src/usb.rs). QEMU ne « capture »
+# alors plus la souris : le curseur du Mac reste libre (on peut attraper
+# Asti) et le pointeur de l'OS est précis, sans clic préalable.
+QEMU_INPUT := -usb -device usb-tablet
 # disque persistant : image raw de 16 Mio sur le Mac, vue comme un vrai
 # disque dur par le noyau (canal IDE primaire).
 QEMU_DISK  := -drive file=$(DISK),format=raw,if=ide,index=0
@@ -140,19 +144,19 @@ ifeq ($(UNAME),Darwin)
 	  AUDIODEV="$(AUDIODEV)" OPENER_LOG="$(OPENER_LOG)" bash bridge/kiosk.sh "$(SHARE)"
 else
 	@bash -c 'bash bridge/opener.sh "$(SHARE)" >$(OPENER_LOG) 2>&1 & OP=$$!; trap "kill $$OP 2>/dev/null" EXIT; \
-	  $(QEMU) -kernel $(KERNEL_BIN) -vga std -full-screen $(QEMU_DISK) $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS)'
+	  $(QEMU) -kernel $(KERNEL_BIN) -vga std -full-screen $(QEMU_DISK) $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS) $(QEMU_INPUT)'
 endif
 
 run-fs: $(KERNEL_BIN) $(DISK)
 	@bash -c 'bash bridge/opener.sh "$(SHARE)" >$(OPENER_LOG) 2>&1 & OP=$$!; trap "kill $$OP 2>/dev/null" EXIT; \
-	  $(QEMU) -kernel $(KERNEL_BIN) -vga std $(QEMU_VIEW_FULL) $(QEMU_DISK) $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS)'
+	  $(QEMU) -kernel $(KERNEL_BIN) -vga std $(QEMU_VIEW_FULL) $(QEMU_DISK) $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS) $(QEMU_INPUT)'
 
 run-win: $(KERNEL_BIN) $(DISK)
 	@bash -c 'bash bridge/opener.sh "$(SHARE)" >$(OPENER_LOG) 2>&1 & OP=$$!; trap "kill $$OP 2>/dev/null" EXIT; \
-	  $(QEMU) -kernel $(KERNEL_BIN) -vga std $(QEMU_VIEW_WIN) $(QEMU_DISK) $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS)'
+	  $(QEMU) -kernel $(KERNEL_BIN) -vga std $(QEMU_VIEW_WIN) $(QEMU_DISK) $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS) $(QEMU_INPUT)'
 
 run-headless: $(KERNEL_BIN)
-	$(QEMU) -kernel $(KERNEL_BIN) -display none $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS)
+	$(QEMU) -kernel $(KERNEL_BIN) -display none $(QEMU_9P) $(QEMU_SND) -serial stdio $(QEMU_FLAGS) $(QEMU_INPUT)
 
 # --- Voie GRUB / ISO (Linux) -----------------------------------------
 $(ISO): $(KERNEL_MB)

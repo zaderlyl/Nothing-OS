@@ -41,13 +41,16 @@ fi
 cleanup() { kill $OPENER $SYS $QPID $PET 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
+# -usb -device usb-tablet : pointeur ABSOLU (src/usb.rs). QEMU ne capture
+# plus la souris → le curseur du Mac reste libre (on peut attraper Asti).
 "$QEMU" -kernel "$KERNEL" -vga std \
-    -display cocoa,zoom-to-fit=on,show-cursor=off \
+    -display cocoa,zoom-to-fit=on,show-cursor=on \
+    -usb -device usb-tablet \
     -drive file="$DISK",format=raw,if=ide,index=0 \
     -fsdev local,id=fsdev0,path="$SHARE",security_model=none \
     -device virtio-9p-pci,fsdev=fsdev0,mount_tag=hostdocs,disable-modern=on \
     -audiodev "$AUDIODEV" -device AC97,audiodev=snd \
-    -serial stdio -m 1G -no-reboot -no-shutdown &
+    -serial stdio -m 1G -no-reboot -no-shutdown -rtc base=localtime &
 QPID=$!
 
 # fenêtre QEMU : au premier plan + taille écran (best-effort ; demande

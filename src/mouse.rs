@@ -76,6 +76,9 @@ static mut SCROLL_ACC: i32 = 0; // crans de molette accumulés (crans, signés)
 /// Renvoie les crans de molette accumulés depuis le dernier appel, puis
 /// remet le compteur à zéro. Positif = vers le haut.
 pub fn take_scroll() -> i32 {
+    if crate::usb::present() {
+        return crate::usb::take_scroll();
+    }
     unsafe {
         let v = SCROLL_ACC;
         SCROLL_ACC = 0;
@@ -131,6 +134,10 @@ fn flush() {
 /// Séquence d'init « canonique » (osdev) : désactive les deux ports,
 /// vide, reprogramme l'octet de config, réactive, puis parle à la souris.
 pub fn init() {
+    // Pointeur absolu USB (tablette) si dispo : QEMU ne capture plus la
+    // souris → curseur du Mac libre (on peut bouger Asti), pointeur précis.
+    crate::usb::init();
+
     ctrl_cmd(0xad); // désactive le port clavier
     ctrl_cmd(0xa7); // désactive le port souris
     flush();
@@ -199,6 +206,7 @@ pub fn init() {
 ///  - un paquet n'est appliqué que si son 1ᵉʳ octet a le bit 3 à 1
 ///    (toujours vrai pour une vraie souris) ; sinon on se resynchronise.
 pub fn poll() {
+    crate::usb::poll();
     unsafe {
         for _ in 0..96 {
             let st = inb(STATUS);
@@ -252,6 +260,15 @@ unsafe fn apply(flags: u8, dx: u8, dy: u8) {
 }
 
 pub fn state() -> State {
+    if crate::usb::present() {
+        let p = crate::usb::state();
+        return State {
+            x: p.x,
+            y: p.y,
+            left: p.left,
+            right: p.right,
+        };
+    }
     unsafe {
         State {
             x: X,

@@ -517,7 +517,11 @@ pub fn run(mut brain: asti::Brain) -> ! {
                 }
             }
         }
-        mouse::draw_cursor(m.x, m.y, PAL_CURSOR, PAL_CURSOR_EDGE, 3, m.left && drag.is_none());
+        // avec la tablette USB, le vrai curseur du Mac est visible et
+        // suit le pointeur → pas besoin d'en dessiner un deuxième.
+        if !crate::usb::present() {
+            mouse::draw_cursor(m.x, m.y, PAL_CURSOR, PAL_CURSOR_EDGE, 3, m.left && drag.is_none());
+        }
         fb::present();
 
         let mut guard = 0u32;
