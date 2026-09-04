@@ -8,8 +8,12 @@ depuis l'OS (`/app discord`).
 ## Compilation
 
 ```
-swiftc -O bridge/discord-bridge.swift -o bridge/discord-bridge
+bridge/build.sh
 ```
+
+Produit `bridge/NothingBridge.app`. **ScreenCaptureKit exige un bundle**
+pour capturer l'écran de façon fiable ; l'autorisation se rattache alors
+au bundle et survit aux recompilations.
 
 ## Utilisation
 
@@ -18,17 +22,22 @@ swiftc -O bridge/discord-bridge.swift -o bridge/discord-bridge
    (par défaut `~/Documents`) :
 
    ```
-   bridge/discord-bridge ~/Documents
+   open bridge/NothingBridge.app --args "$HOME/Documents"
    ```
 
-3. Autorise, à la première exécution :
-   - **Enregistrement de l'écran** (capture) — Réglages ▸ Confidentialité
-     et sécurité ▸ Enregistrement de l'écran ▸ ajouter le Terminal.
-   - **Accessibilité** (souris/clavier) — même endroit ▸ Accessibilité.
-   Relance le pont après avoir coché.
+3. **Autorisations** (à la première exécution une boîte de dialogue
+   apparaît ; sinon va la cocher à la main) :
+   - Réglages ▸ Confidentialité et sécurité ▸ **Enregistrement de
+     l'écran** ▸ coche **NothingBridge**.
+   - Réglages ▸ Confidentialité et sécurité ▸ **Accessibilité** ▸ coche
+     **NothingBridge** (pour la souris/clavier).
+   Puis **relance** : `open bridge/NothingBridge.app --args "$HOME/Documents"`.
 
-4. Dans Nothing OS : `/app discord`. Si le pont tourne, c'est le vrai
-   Discord ; sinon la maquette s'affiche.
+4. `make run` → dans Nothing OS : `/app discord`. Si le pont tourne,
+   c'est le vrai Discord ; sinon la maquette s'affiche.
+
+Journal du pont : `~/Library/Logs/nothing-bridge.log`
+Diagnostic noyau : lignes `[remote]` dans le terminal de `make run`.
 
 ## Protocole (fichiers dans `<partage>/.nothingos-bridge/`)
 
