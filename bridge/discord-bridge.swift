@@ -11,6 +11,8 @@
 
 import Cocoa
 import CoreGraphics
+import CoreMedia
+import CoreVideo
 import ScreenCaptureKit
 
 let FW = 960, FH = 576
@@ -112,47 +114,50 @@ func pumpInput(_ dir: String, _ winRect: CGRect, _ pid: pid_t) {
     }
 }
 
-// --- boucle de capture (async, sans sémaphore) --------------------
-actor Loop {
+// --- capture continue via SCStream (delegate, pas de polling) -------
+final class Cap: NSObject, SCStreamOutput, SCStreamDelegate {
     let dir: String
+    let q = DispatchQueue(label: "nothing.bridge.capture")
+    var stream: SCStream?
     var prev: [UInt8]?
     var seq: UInt32 = 0
     var frames = 0
-    init(_ dir: String) { self.dir = dir }
+    var winRect = CGRect.zero
+    var askedOnce = false, waitLogged = false, restarting = false
 
-    var askedOnce = false
-    var waitLogged = false
+    init(_ dir: String) { self.dir = dir; super.init() }
 
-    func run() async {
-        log("[bridge] demarrage — partage \(dir)")
-        // On attend l'autorisation SANS marteler SCShareableContent
-        // (chaque appel non autorisé relance la pop-up macOS).
-        while !CGPreflightScreenCaptureAccess() {
-            if !askedOnce {
-                askedOnce = true
-                log("[bridge] demande de l'autorisation « Enregistrement de l'ecran »…")
-                _ = CGRequestScreenCaptureAccess() // ouvre la boite UNE fois
-            } else if !waitLogged {
-                waitLogged = true
-                log("[bridge] en attente — Reglages ▸ Confidentialite ▸ Enregistrement de l'ecran ▸ coche « NothingBridge », puis QUITTE et relance ce pont")
+    func begin() {
+        Task { @MainActor in
+            while !CGPreflightScreenCaptureAccess() {
+                if !askedOnce { askedOnce = true
+                    log("[bridge] demande de l'autorisation « Enregistrement de l'ecran »…")
+                    _ = CGRequestScreenCaptureAccess()
+                } else if !waitLogged { waitLogged = true
+                    log("[bridge] en attente — coche « NothingBridge » dans Reglages ▸ Enregistrement de l'ecran, puis QUITTE et relance")
+                }
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
             }
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
-        }
-        log("[bridge] autorisation OK")
-
-        while true {
-            let t0 = Date()
-            await step()
-            let wait = 1.0/FPS - Date().timeIntervalSince(t0)
-            if wait > 0 { try? await Task.sleep(nanoseconds: UInt64(wait * 1e9)) }
+            log("[bridge] autorisation OK")
+            await self.startStream()
         }
     }
 
-    func step() async {
+    func restart(_ why: String) {
+        if restarting { return }
+        restarting = true
+        log("[bridge] \(why) — relance dans 2 s")
+        try? stream?.stopCapture { _ in }
+        stream = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            self?.restarting = false
+            Task { @MainActor in await self?.startStream() }
+        }
+    }
+
+    func startStream() async {
         guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) else {
-            log("[bridge] SCShareableContent a echoue (autorisation revoquee ?) — QUITTE et relance")
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            return
+            restart("contenu partageable indisponible"); return
         }
         var win: SCWindow? = nil; var area: CGFloat = 0
         for w in content.windows {
@@ -160,52 +165,95 @@ actor Loop {
             let a = w.frame.width * w.frame.height
             if a > area && a > 40_000 { area = a; win = w }
         }
-        guard let w = win else { if frames == 0 { log("[bridge] fenetre Discord introuvable — ouvre Discord") }; return }
+        guard let w = win else { restart("fenetre Discord introuvable (ouvre Discord)"); return }
+        winRect = w.frame
 
         let cfg = SCStreamConfiguration()
         cfg.width = FW; cfg.height = FH
         cfg.pixelFormat = kCVPixelFormatType_32BGRA
-        cfg.showsCursor = false; cfg.scalesToFit = true
-        let filter = SCContentFilter(desktopIndependentWindow: w)
-        guard let img = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: cfg),
-              let cf = img.dataProvider?.data, let base = CFDataGetBytePtr(cf) else {
-            if frames == 0 { log("[bridge] capture nil — accorde 'Enregistrement de l'ecran'") }
-            return
+        cfg.showsCursor = false
+        cfg.scalesToFit = true
+        cfg.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(FPS))
+        cfg.queueDepth = 5
+        let s = SCStream(filter: SCContentFilter(desktopIndependentWindow: w), configuration: cfg, delegate: self)
+        do {
+            try s.addStreamOutput(self, type: .screen, sampleHandlerQueue: q)
+            try await s.startCapture()
+            stream = s
+            log("[bridge] flux demarre — fenetre \(w.frame.size)")
+        } catch {
+            restart("startCapture: \(error)")
         }
-        let iw = img.width, ih = img.height, bpr = img.bytesPerRow, bpp = img.bitsPerPixel/8
-        let n = CFDataGetLength(cf)
-        var cur = [UInt8](repeating: 0, count: FW*FH)
-        for y in 0..<FH {
-            let sy = min(ih-1, y*ih/FH) * bpr
-            for x in 0..<FW {
-                let o = sy + min(iw-1, x*iw/FW) * bpp
-                if o + 2 < n { cur[y*FW + x] = quant(Int(base[o+2]), Int(base[o+1]), Int(base[o])) }
-            }
-        }
-        frames += 1
-        if frames == 1 { log("[bridge] 1re image OK — \(Set(cur).count) couleurs, fenetre \(w.frame.size)") }
+    }
 
-        let full = prev == nil || forceFull || seq % 40 == 0
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        restart("flux arrete: \(error)")
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sb: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .screen, CMSampleBufferIsValid(sb) else { return }
+
+        // statut de la trame
+        var complete = true
+        if let arr = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+           let raw = arr.first?[.status] as? Int, let st = SCFrameStatus(rawValue: raw) {
+            complete = (st == .complete)
+        }
+
+        if let px = complete ? CMSampleBufferGetImageBuffer(sb) : nil {
+            CVPixelBufferLockBaseAddress(px, .readOnly)
+            defer { CVPixelBufferUnlockBaseAddress(px, .readOnly) }
+            guard let base = CVPixelBufferGetBaseAddress(px)?.assumingMemoryBound(to: UInt8.self) else { return }
+            let bpr = CVPixelBufferGetBytesPerRow(px)
+            let iw = CVPixelBufferGetWidth(px), ih = CVPixelBufferGetHeight(px)
+            var cur = [UInt8](repeating: 0, count: FW * FH)
+            for y in 0..<FH {
+                let sy = min(ih - 1, y * ih / FH) * bpr
+                for x in 0..<FW {
+                    let o = sy + min(iw - 1, x * iw / FW) * 4
+                    cur[y * FW + x] = quant(Int(base[o + 2]), Int(base[o + 1]), Int(base[o]))
+                }
+            }
+            frames += 1
+            if frames == 1 { log("[bridge] 1re image OK — \(Set(cur).count) couleurs") }
+            if frames % 300 == 0 { log("[bridge] \(frames) images") }
+            emit(cur: cur)
+        } else {
+            // trame « idle » : rien n'a changé → on ré-émet le dernier
+            // état (garde le noyau « live » et honore les keyframes)
+            if let p = prev { frames += 1; emit(cur: p) }
+        }
+
+        pumpInput(dir, winRect, discordPid())
+    }
+
+    func emit(cur: [UInt8]) {
+        let full = prev == nil || forceFull || seq % 30 == 0
         forceFull = false
         seq &+= 1
         writeFrame(dir, seq: seq, cur: cur, prev: prev, full: full)
         prev = cur
-
-        var pid: pid_t = 0
-        for a in NSWorkspace.shared.runningApplications where (a.localizedName ?? "").contains("Discord") && a.activationPolicy == .regular { pid = a.processIdentifier }
-        pumpInput(dir, w.frame, pid)
     }
+}
+
+func discordPid() -> pid_t {
+    for a in NSWorkspace.shared.runningApplications
+    where (a.localizedName ?? "").contains("Discord") && a.activationPolicy == .regular {
+        return a.processIdentifier
+    }
+    return 0
 }
 
 // --- démarrage --------------------------------------------------
 var sharePath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents").path
-let a = CommandLine.arguments
-if a.count >= 2 && !a[1].hasPrefix("-") { sharePath = (a[1] as NSString).expandingTildeInPath }
+let cliArgs = CommandLine.arguments
+if cliArgs.count >= 2 && !cliArgs[1].hasPrefix("-") { sharePath = (cliArgs[1] as NSString).expandingTildeInPath }
 let dir = sharePath + "/.nothingos-bridge"
 try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+log("[bridge] demarrage — partage \(dir)")
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
-let loop = Loop(dir)
-Task.detached(priority: .userInitiated) { await loop.run() }
+let cap = Cap(dir)
+cap.begin()
 app.run()

@@ -246,7 +246,6 @@ pub fn feed_key(c: u8, down: bool) {
 pub fn request_keyframe() {
     unsafe {
         GOT_FULL = false;
-        SEQ = 0;
     }
     push(&[b'F']);
 }
