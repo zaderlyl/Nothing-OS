@@ -49,6 +49,7 @@ mod shelf;
 mod sysinfo;
 mod term;
 mod time;
+mod todo;
 mod usb;
 mod vga;
 mod virtio;

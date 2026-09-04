@@ -51,6 +51,9 @@ struct Body {
 }
 
 static mut ITEMS: Vec<Mail> = Vec::new();
+static mut PINNED: Vec<Mail> = Vec::new();
+static mut PIN_Y: [i32; 6] = [0; 6];
+static mut PIN_N: usize = 0;
 static mut UNREAD: u32 = 0;
 static mut BODY: Option<Body> = None;
 static mut OPEN_ID: i64 = 0;
@@ -87,6 +90,68 @@ pub fn close() {
     }
 }
 
+pub fn pinned_count() -> usize {
+    unsafe { PINNED.len() }
+}
+
+fn is_pinned(id: i64) -> bool {
+    unsafe { PINNED.iter().any(|m| m.id == id) }
+}
+
+/// Ouvre directement un message (depuis la liste des épinglés).
+fn open_msg(id: i64) {
+    unsafe {
+        WANT_LIST = true;
+        OPEN_ID = id;
+        BODY = None;
+        READER_SCROLL = 0;
+        cmd("open", id);
+    }
+}
+
+/// Rendu de la section « EPINGLES » dans la barre latérale. Renvoie le
+/// prochain `y`. Mémorise les positions pour `sidebar_pin_click`.
+pub fn draw_sidebar_pins(x0: i32, mut y: i32, w: i32, head: u8, txt: u8, dim: u8, acc: u8) -> i32 {
+    unsafe {
+        font::draw_str_scaled(x0, y, "EPINGLES", head, 2);
+        y += 40;
+        PIN_N = PINNED.len().min(6);
+        if PIN_N == 0 {
+            font::draw_str_scaled(x0, y, "aucun", dim, 2);
+            return y + 36;
+        }
+        for (i, m) in PINNED.iter().take(6).enumerate() {
+            PIN_Y[i] = y;
+            let _ = acc;
+            font::draw_str_scaled(x0, y, &m.from, txt, 2);
+            let mut line = m.subject.clone();
+            trunc_at(x0, y + 22, x0 + w, &line, dim);
+            let _ = &mut line;
+            y += 52;
+        }
+        y
+    }
+}
+
+pub fn sidebar_pin_click(mx: i32, my: i32, x0: i32, w: i32) -> bool {
+    unsafe {
+        if mx < x0 || mx > x0 + w {
+            return false;
+        }
+        for i in 0..PIN_N {
+            if my >= PIN_Y[i] - 8 && my < PIN_Y[i] + 40 {
+                open_msg(PINNED[i].id);
+                return true;
+            }
+        }
+        false
+    }
+}
+
+fn trunc_at(x: i32, y: i32, maxx: i32, s: &str, col: u8) {
+    fit(x, y, maxx, s, col);
+}
+
 fn cmd(verb: &str, id: i64) {
     unsafe {
         SEQ = SEQ.wrapping_add(1);
@@ -109,24 +174,33 @@ pub fn poll(now: f32) {
         if let Some(d) = p9::read_file(LIST_PATH) {
             if let Ok(t) = core::str::from_utf8(&d) {
                 let mut v: Vec<Mail> = Vec::new();
+                let mut pins: Vec<Mail> = Vec::new();
                 for ln in t.lines() {
                     if let Some(n) = ln.strip_prefix("unread=") {
                         UNREAD = n.trim().parse().unwrap_or(0);
                         continue;
                     }
-                    let mut it = ln.splitn(5, '|');
+                    let pinned = ln.starts_with("PIN|");
+                    let body = if pinned { &ln[4..] } else { ln };
+                    let mut it = body.splitn(if pinned { 4 } else { 5 }, '|');
                     let id: i64 = match it.next().and_then(|x| x.parse().ok()) {
                         Some(v) => v,
                         None => continue,
                     };
-                    let read = it.next() == Some("1");
+                    let read = if pinned { true } else { it.next() == Some("1") };
                     let from = it.next().unwrap_or("").to_string();
                     let subject = it.next().unwrap_or("(sans sujet)").to_string();
                     let date = it.next().unwrap_or("").to_string();
-                    v.push(Mail { id, read, from, subject, date });
+                    let m = Mail { id, read, from, subject, date };
+                    if pinned {
+                        pins.push(m);
+                    } else {
+                        v.push(m);
+                    }
                 }
                 if !v.is_empty() || t.starts_with("unread=") {
                     ITEMS = v;
+                    PINNED = pins;
                     GOT = true;
                 }
             }
@@ -220,9 +294,9 @@ pub fn on_click(mx: i32, my: i32) -> bool {
             if mx >= rx && mx <= rx + RW {
                 let by = h - 58;
                 if my >= by && my <= by + 40 {
-                    // 3 boutons : Lu | Archiver | Fermer
-                    let bw = (RW - 96) / 3;
-                    let i = (mx - rx - 32) / (bw + 16);
+                    // 4 boutons : Lu | Epingler/Retirer | Archiver | Fermer
+                    let bw = (RW - 80) / 4;
+                    let i = (mx - rx - 24) / (bw + 8);
                     match i {
                         0 => {
                             cmd("read", OPEN_ID);
@@ -231,6 +305,15 @@ pub fn on_click(mx: i32, my: i32) -> bool {
                             }
                         }
                         1 => {
+                            if is_pinned(OPEN_ID) {
+                                cmd("unpin", OPEN_ID);
+                                PINNED.retain(|m| m.id != OPEN_ID);
+                            } else {
+                                cmd("pin", OPEN_ID);
+                            }
+                            return true; // reste ouvert
+                        }
+                        2 => {
                             cmd("archive", OPEN_ID);
                             ITEMS.retain(|m| m.id != OPEN_ID);
                         }
@@ -247,6 +330,14 @@ pub fn on_click(mx: i32, my: i32) -> bool {
         if LIST_OUT > 0.5 {
             let lx = list_x();
             if mx >= lx {
+                // bouton « Tout marquer lu » dans l'en-tête
+                if my >= 14 && my <= 50 && mx >= lx + LW - 220 {
+                    cmd("readall", 0);
+                    for m in ITEMS.iter_mut() {
+                        m.read = true;
+                    }
+                    return true;
+                }
                 let idx = (my - LIST_TOP + LIST_SCROLL) / ROW;
                 if idx >= 0 && (idx as usize) < ITEMS.len() {
                     let id = ITEMS[idx as usize].id;
@@ -280,6 +371,11 @@ pub fn draw(now: f32) {
             let mut hdr = UNREAD.to_string();
             hdr.push_str(" non lus");
             font::draw_str_scaled(x + 110, 22, &hdr, ACCENT, 2);
+            // bouton « Tout marquer lu »
+            let bl = "Tout marquer lu";
+            let blw = font::width_scaled(bl, 2);
+            fb::fill_rect(x + LW - 32 - blw - 20, 12, blw + 20, 34, LINE);
+            font::draw_str_scaled(x + LW - 32 - blw - 10, 20, bl, TXT, 2);
 
             let mut y = LIST_TOP - LIST_SCROLL;
             for m in ITEMS.iter() {
@@ -339,9 +435,11 @@ pub fn draw(now: f32) {
                     fb::fill_rect(x, bot, RW, h - bot, BG);
                     fb::fill_rect(x + 32, bot, RW - 64, 1, LINE);
                     let by = h - 58;
-                    let bw = (RW - 96) / 3;
-                    for (i, lbl) in ["Marquer lu", "Archiver", "Fermer"].iter().enumerate() {
-                        let bx = x + 32 + i as i32 * (bw + 16);
+                    let bw = (RW - 80) / 4;
+                    let pin_lbl = if is_pinned(b.id) { "Retirer" } else { "Epingler" };
+                    for (i, lbl) in ["Marquer lu", pin_lbl, "Archiver", "Fermer"].iter().enumerate()
+                    {
+                        let bx = x + 24 + i as i32 * (bw + 8);
                         fb::fill_rect(bx, by, bw, 40, LINE);
                         let tw = font::width_scaled(lbl, 2);
                         font::draw_str_scaled(bx + (bw - tw) / 2, by + 10, lbl, TXT, 2);

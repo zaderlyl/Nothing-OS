@@ -30,6 +30,8 @@ struct Ev {
     when: String,
     summ: String,
     loc: String,
+    endlbl: String,
+    desc: String,
 }
 
 static mut EVS: Vec<Ev> = Vec::new();
@@ -37,6 +39,45 @@ static mut MAC_NOW: i64 = 0;
 static mut READ_AT: f32 = -1.0;
 static mut LAST: f32 = -100.0;
 static mut GOT: bool = false;
+
+static mut OPEN: Option<usize> = None;
+static mut DET_OUT: f32 = 0.0;
+static mut ROW_Y: [i32; 6] = [0; 6]; // Y des lignes cliquables (barre latérale)
+static mut ROW_N: usize = 0;
+
+pub fn detail_active() -> bool {
+    unsafe { OPEN.is_some() || DET_OUT > 0.01 }
+}
+
+pub fn close_detail() {
+    unsafe {
+        OPEN = None;
+    }
+}
+
+/// Clic dans la barre latérale : ouvre le détail de l'évènement survolé.
+pub fn sidebar_click(mx: i32, my: i32, x0: i32, w: i32) -> bool {
+    unsafe {
+        if mx < x0 - 12 || mx > x0 + w + 12 {
+            return false;
+        }
+        for i in 0..ROW_N {
+            if my >= ROW_Y[i] - 12 && my < ROW_Y[i] + 48 {
+                OPEN = Some(i);
+                return true;
+            }
+        }
+        false
+    }
+}
+
+pub fn update(dt: f32) {
+    unsafe {
+        let t = if OPEN.is_some() { 1.0 } else { 0.0 };
+        DET_OUT += (t - DET_OUT) * (1.0 - libm::powf(0.5, dt * 12.0));
+        DET_OUT = DET_OUT.clamp(0.0, 1.0);
+    }
+}
 
 pub fn available() -> bool {
     unsafe { GOT && !EVS.is_empty() }
@@ -63,7 +104,7 @@ pub fn poll(now: f32) {
                 READ_AT = now;
                 continue;
             }
-            let mut it = line.splitn(5, '|');
+            let mut it = line.splitn(7, '|');
             let s: i64 = match it.next().and_then(|x| x.parse().ok()) {
                 Some(v) => v,
                 None => continue,
@@ -72,7 +113,9 @@ pub fn poll(now: f32) {
             let when = it.next().unwrap_or("").to_string();
             let summ = it.next().unwrap_or("").to_string();
             let loc = it.next().unwrap_or("").to_string();
-            evs.push(Ev { start: s, end: e, when, summ, loc });
+            let endlbl = it.next().unwrap_or("").to_string();
+            let desc = it.next().unwrap_or("").to_string();
+            evs.push(Ev { start: s, end: e, when, summ, loc, endlbl, desc });
         }
         if !evs.is_empty() || text.starts_with("now=") {
             EVS = evs;
@@ -149,8 +192,14 @@ pub fn draw_sidebar(
             return y + 36;
         }
         let now_ep = epoch_now(scene_now);
+        ROW_N = EVS.len().min(4);
         for (i, ev) in EVS.iter().take(4).enumerate() {
             let first = i == 0;
+            let sel = OPEN == Some(i);
+            ROW_Y[i] = y;
+            if sel {
+                fb::fill_rect(x0 - 10, y - 8, w + 20, 56, LINE);
+            }
             font::draw_str_scaled(x0, y, &ev.when, if first { col_accent } else { col_dim }, 2);
             if first {
                 if let Some(cd) = countdown(ev, now_ep) {
@@ -159,7 +208,7 @@ pub fn draw_sidebar(
                 }
             }
             let maxx = x0 + w;
-            let tc = if first { col_txt } else { col_dim };
+            let tc = if first || sel { col_txt } else { col_dim };
             let mut line = ev.summ.clone();
             if !ev.loc.is_empty() {
                 line.push_str("  ");
@@ -170,6 +219,114 @@ pub fn draw_sidebar(
         }
         y
     }
+}
+
+// --- panneau détail (à droite) ---
+const DW: i32 = 620;
+
+pub fn draw_detail() {
+    unsafe {
+        if DET_OUT < 0.02 {
+            return;
+        }
+        let w = fb::WIDTH as i32;
+        let h = fb::HEIGHT as i32;
+        let x = w - (DW as f32 * DET_OUT) as i32;
+        fb::fill_rect(x - 2, 0, DW + 2, h, LINE);
+        fb::fill_rect(x, 0, DW, h, BG);
+        fb::fill_rect(x, 0, 4, h, ACCENT);
+
+        let ev = match OPEN.and_then(|i| EVS.get(i)) {
+            Some(e) => e,
+            None => return,
+        };
+        let px = x + 34;
+        let maxx = x + DW - 28;
+        font::draw_str_scaled(px, 26, "EVENEMENT", DIM, 2);
+
+        let mut y = 74;
+        for l in wrap(&ev.summ, maxx - px) {
+            font::draw_str_scaled(px, y, &l, TXT, 3);
+            y += 40;
+        }
+        y += 14;
+        let mut whenl = ev.when.clone();
+        if !ev.endlbl.is_empty() {
+            whenl.push_str(" - ");
+            whenl.push_str(&ev.endlbl);
+        }
+        font::draw_str_scaled(px, y, &whenl, ACCENT, 2);
+        y += 40;
+        if !ev.loc.is_empty() {
+            font::draw_str_scaled(px, y, "salle", DIM, 2);
+            font::draw_str_scaled(px + 90, y, &ev.loc, TXT, 2);
+            y += 40;
+        }
+        if !ev.desc.is_empty() {
+            y += 12;
+            fb::fill_rect(px, y, DW - 64, 1, LINE);
+            y += 24;
+            for l in wrap(&ev.desc, maxx - px) {
+                if y > h - 80 {
+                    break;
+                }
+                font::draw_str_scaled(px, y, &l, DIM, 2);
+                y += 26;
+            }
+        }
+        // bouton fermer
+        let by = h - 58;
+        fb::fill_rect(px, by, 160, 40, LINE);
+        font::draw_str_scaled(px + 40, by + 10, "Fermer", TXT, 2);
+    }
+}
+
+pub fn on_click(mx: i32, my: i32) -> bool {
+    unsafe {
+        if OPEN.is_none() {
+            return false;
+        }
+        let w = fb::WIDTH as i32;
+        let h = fb::HEIGHT as i32;
+        let x = w - DW;
+        if mx < x {
+            OPEN = None; // clic dehors
+            return true;
+        }
+        let by = h - 58;
+        if my >= by && my <= by + 40 && mx >= x + 34 && mx <= x + 34 + 160 {
+            OPEN = None;
+        }
+        true
+    }
+}
+
+fn wrap(s: &str, px_w: i32) -> Vec<String> {
+    let cw = font::width_scaled("m", 2).max(1);
+    let cols = ((px_w / cw) as usize).max(8);
+    let mut out: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in s.split(' ') {
+        if line.is_empty() {
+            line.push_str(word);
+        } else if line.chars().count() + 1 + word.chars().count() <= cols {
+            line.push(' ');
+            line.push_str(word);
+        } else {
+            out.push(core::mem::take(&mut line));
+            line.push_str(word);
+        }
+        if line.chars().count() > cols {
+            out.push(core::mem::take(&mut line));
+        }
+    }
+    if !line.is_empty() {
+        out.push(line);
+    }
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
 }
 
 fn trunc(x: i32, y: i32, maxx: i32, s: &str, col: u8) {

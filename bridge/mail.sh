@@ -17,10 +17,32 @@ SHARE = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/Documents")
 LIST = os.path.join(SHARE, ".nothingos-mail")
 CMD = os.path.join(SHARE, ".nothingos-mail-cmd")
 BODY = os.path.join(SHARE, ".nothingos-mail-body")
+PINS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mail-pins.tsv")
 COUNT = 18
 REFRESH = 25
 
 last_cmd = ""
+last_list = []          # [(id, read, from, subject, date)] du dernier refresh
+
+
+def load_pins():
+    # id \t from \t subject \t date  (méta figée au moment de l'épinglage)
+    out = []
+    try:
+        for ln in open(PINS, encoding="utf-8"):
+            p = ln.rstrip("\n").split("\t")
+            if len(p) >= 4:
+                out.append(p[:4])
+    except Exception:
+        pass
+    return out
+
+
+def save_pins(pins):
+    with open(PINS + ".tmp", "w", encoding="utf-8") as f:
+        for p in pins:
+            f.write("\t".join(p[:4]) + "\n")
+    os.replace(PINS + ".tmp", PINS)
 
 
 _PUNCT = {"’": "'", "‘": "'", "“": '"', "”": '"',
@@ -73,6 +95,8 @@ def refresh_list():
     raw = osa(script)
     if not raw:
         return
+    global last_list
+    last_list = []
     lines = []
     for ln in raw.splitlines():
         if ln.startswith("unread="):
@@ -86,11 +110,15 @@ def refresh_list():
         frm = ascii_only(shorten_sender(p[2]))[:40]
         sub = ascii_only(p[3]).replace("|", "/")[:90] or "(sans sujet)"
         dt = ascii_only(date_label(p[4]))
+        last_list.append((mid, rd, frm, sub, dt))
         lines.append(f"{mid}|{rd}|{frm}|{sub}|{dt}")
+    # évènements épinglés (méta figée) → lignes PIN|
+    for pid, pf, ps, pd in load_pins():
+        lines.append(f"PIN|{pid}|{ascii_only(pf)[:40]}|{ascii_only(ps)[:90]}|{ascii_only(pd)}")
     tmp = LIST + ".tmp"
     open(tmp, "w", encoding="utf-8").write("\n".join(lines) + "\n")
     os.replace(tmp, LIST)
-    sys.stderr.write(f"[mail] {len(lines)-1} messages listés\n")
+    sys.stderr.write(f"[mail] {len(last_list)} msgs, {len(load_pins())} epingles\n")
 
 
 def shorten_sender(s):
@@ -198,6 +226,27 @@ def do_cmd(verb, mid):
                 set mailbox of m to (mailbox "Archive" of account 1)
             end try
         end tell''')
+    elif verb == "pin":
+        pins = load_pins()
+        if not any(p[0] == mid for p in pins):
+            meta = next((m for m in last_list if m[0] == mid), None)
+            if meta:
+                pins.insert(0, [mid, meta[2], meta[3], meta[4]])
+                save_pins(pins)
+            osa(f'tell application "Mail" to set flagged status of (first message of inbox whose id is {mid}) to true')
+    elif verb == "unpin":
+        save_pins([p for p in load_pins() if p[0] != mid])
+        osa(f'try\ntell application "Mail" to set flagged status of (first message of inbox whose id is {mid}) to false\nend try')
+    elif verb == "readall":
+        # marque lu par lots, EN TÂCHE DE FOND (ne bloque pas la boucle)
+        subprocess.Popen(["osascript", "-e", '''
+        tell application "Mail"
+            repeat with k from 0 to 60
+                try
+                    set read status of (messages (k * 50 + 1) thru (k * 50 + 50) of inbox) to true
+                end try
+            end repeat
+        end tell'''])
     sys.stderr.write(f"[mail] {verb} {mid}\n")
 
 

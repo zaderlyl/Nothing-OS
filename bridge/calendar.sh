@@ -100,7 +100,11 @@ def events_from(ics):
         e = parse_dt(d.get("DTEND", "")) or (s + 3600 if s else None)
         if s is None:
             continue
-        evs.append((s, e, deescape(d.get("SUMMARY", "")), deescape(d.get("LOCATION", ""))))
+        desc = deescape(d.get("DESCRIPTION", ""))
+        desc = " ".join(desc.split())  # aplatit les retours ligne / espaces
+        desc = re.sub(r"\(Exported\s*:[^)]*\)", "", desc).strip()
+        evs.append((s, e, deescape(d.get("SUMMARY", "")),
+                    deescape(d.get("LOCATION", "")), desc))
     return evs
 
 
@@ -129,10 +133,13 @@ def run_once():
     # prochains évènements (en cours ou à venir), triés
     upc = sorted([e for e in allev if (e[1] or e[0]) >= now])[:MAX_EVENTS]
     lines = [f"now={now}"]
-    for s, e, summ, loc in upc:
-        summ = ascii_only(summ.replace("|", "/"))[:80]
-        loc = ascii_only(loc.replace("|", "/"))[:40]
-        lines.append(f"{s}|{e or s}|{ascii_only(when_label(s, now))}|{summ}|{loc}")
+    for s, e, summ, loc, desc in upc:
+        summ = ascii_only(summ.replace("|", "/"))[:90]
+        loc = ascii_only(loc.replace("|", "/"))[:50]
+        desc = ascii_only(desc.replace("|", "/"))[:400]
+        when2 = ascii_only(when_label(s, now))
+        endlbl = time.strftime("%H:%M", time.localtime(e)) if e else ""
+        lines.append(f"{s}|{e or s}|{when2}|{summ}|{loc}|{endlbl}|{desc}")
     tmp = OUT + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
