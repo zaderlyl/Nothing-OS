@@ -125,10 +125,12 @@ def load_config():
 
 
 def curl_json(url):
+    # court : c'est une API, elle doit répondre vite ou pas du tout — on
+    # ne fait jamais attendre longtemps avant de basculer sur Firefox.
     try:
-        out = subprocess.run(["curl", "-sS", "--max-time", "15",
+        out = subprocess.run(["curl", "-sS", "--connect-timeout", "4", "--max-time", "7",
                               "-H", "User-Agent: nothing-os/1.0", url],
-                             capture_output=True, text=True, timeout=20).stdout
+                             capture_output=True, text=True, timeout=9).stdout
         return json.loads(out)
     except Exception as e:
         sys.stderr.write(f"[web] {e}\n")
@@ -138,10 +140,10 @@ def curl_json(url):
 def curl_html(url):
     try:
         return subprocess.run(
-            ["curl", "-sSL", "--max-time", "15", "-A",
+            ["curl", "-sSL", "--connect-timeout", "5", "--max-time", "10", "-A",
              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) NothingOS/1.0",
              url],
-            capture_output=True, text=True, timeout=25).stdout
+            capture_output=True, text=True, timeout=12).stdout
     except Exception as e:
         sys.stderr.write(f"[web] fetch: {e}\n")
         return ""
