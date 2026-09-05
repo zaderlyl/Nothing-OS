@@ -1,15 +1,13 @@
-//! `/web` : réponse directe, liste de résultats et lecture d'article,
-//! affichés sous la barre de recherche.
+//! `/web` : réponse directe et lecture d'article, affichés sous la barre
+//! de recherche.
 //!
 //! Le noyau écrit la requête dans `.nothingos-web` ; `bridge/web.sh` :
 //!  - question → réponse Wikipédia (`.nothingos-web-answer`)
-//!  - url / clic sur un résultat ou un lien → essaie d'extraire le texte
-//!    lisible (`.nothingos-web-article`) ; sinon ouvre Firefox
-//!  - recherche générale (si `websearch.env` configuré) → liste de
-//!    résultats Google (`.nothingos-web-results`) ; sinon Firefox direct.
-//!
-//! Un clic sur un résultat écrit `.nothingos-web-open` (repris par
-//! `web.sh`), ce qui permet aussi de « naviguer » de proche en proche.
+//!  - url / clic sur un lien → essaie d'extraire le texte lisible
+//!    (`.nothingos-web-article`) ; sinon ouvre Firefox
+//!  - sinon → recherche ouverte directement dans Firefox (pas d'API de
+//!    résultats : Google Custom Search est inutilisable sans compte de
+//!    facturation lié, abandonné).
 
 #![allow(static_mut_refs, dead_code)]
 
@@ -19,22 +17,13 @@ use alloc::vec::Vec;
 use crate::{fb, font, p9};
 
 const ANS_PATH: &str = ".nothingos-web-answer";
-const RES_PATH: &str = ".nothingos-web-results";
 const ART_PATH: &str = ".nothingos-web-article";
 const REQ_PATH: &str = ".nothingos-web";
-const OPEN_PATH: &str = ".nothingos-web-open";
 
 const BG: u8 = 15; // PAL_SEARCH
 const TXT: u8 = 9; // PAL_TEXT
 const DIM: u8 = 10; // PAL_TEXT_DIM
 const ACCENT: u8 = 13; // PAL_ACCENT
-
-struct Res {
-    title: String,
-    url: String,
-    domain: String,
-    snippet: String,
-}
 
 struct Article {
     url: String,
@@ -43,33 +32,26 @@ struct Article {
 }
 
 // 0 rien, 1 attente, 2 réponse, 3 recherche ouverte (navigateur),
-// 4 liste de résultats, 5 article lisible
+// 5 article lisible
 static mut STATE: u8 = 0;
 static mut QUERY: String = String::new();
 static mut SRC: String = String::new();
 static mut LINES: Vec<String> = Vec::new();
-static mut RESULTS: Vec<Res> = Vec::new();
 static mut ARTICLE: Option<Article> = None;
 static mut SCROLL: i32 = 0;
-static mut ROW_Y: [i32; 8] = [0; 8];
-static mut ROW_N: usize = 0;
 
 static mut LAST: f32 = -100.0;
 static mut SEEN_ANS: String = String::new();
-static mut SEEN_RES: String = String::new();
 static mut SEEN_ART: String = String::new();
-static mut SEQ: u32 = 0;
 
 pub fn pending() {
     unsafe {
         STATE = 1;
         LINES.clear();
         SRC.clear();
-        RESULTS.clear();
         ARTICLE = None;
         SCROLL = 0;
         SEEN_ANS.clear();
-        SEEN_RES.clear();
         SEEN_ART.clear();
     }
 }
@@ -82,41 +64,6 @@ pub fn dismiss() {
 
 pub fn visible() -> bool {
     unsafe { STATE != 0 }
-}
-
-fn seq_bytes(prefix: &str) -> Vec<u8> {
-    unsafe {
-        SEQ = SEQ.wrapping_add(1);
-        let mut buf = Vec::with_capacity(prefix.len() + 12);
-        buf.extend_from_slice(prefix.as_bytes());
-        let mut n = SEQ;
-        let mut d = [0u8; 10];
-        let mut i = d.len();
-        loop {
-            i -= 1;
-            d[i] = b'0' + (n % 10) as u8;
-            n /= 10;
-            if n == 0 {
-                break;
-            }
-        }
-        buf.extend_from_slice(&d[i..]);
-        buf
-    }
-}
-
-/// Demande l'ouverture d'une URL (clic sur un résultat / lien).
-fn request_open(url: &str) {
-    let mut buf = seq_bytes("");
-    buf.push(b'\n');
-    buf.extend_from_slice(url.as_bytes());
-    buf.push(b'\n');
-    p9::write_file(OPEN_PATH, &buf);
-    unsafe {
-        STATE = 1;
-        SCROLL = 0;
-        SEEN_ART.clear();
-    }
 }
 
 pub fn poll(now: f32) {
@@ -132,15 +79,6 @@ pub fn poll(now: f32) {
                 if !t.is_empty() && t != SEEN_ANS {
                     SEEN_ANS = t.to_string();
                     parse_answer(t);
-                }
-            }
-        }
-        // liste de résultats
-        if let Some(d) = p9::read_file(RES_PATH) {
-            if let Ok(t) = core::str::from_utf8(&d) {
-                if !t.is_empty() && t != SEEN_RES {
-                    SEEN_RES = t.to_string();
-                    parse_results(t);
                 }
             }
         }
@@ -173,37 +111,12 @@ unsafe fn parse_answer(t: &str) {
         } else if ln == "open" {
             STATE = 3;
             return;
-        } else if ln == "quota" {
-            STATE = 6;
-            return;
         }
     }
     while LINES.first().map(|s| s.is_empty()).unwrap_or(false) {
         LINES.remove(0);
     }
     STATE = if LINES.is_empty() { 1 } else { 2 };
-}
-
-unsafe fn parse_results(t: &str) {
-    let mut v = Vec::new();
-    for ln in t.lines() {
-        if let Some(q) = ln.strip_prefix("q=") {
-            QUERY = q.to_string();
-            continue;
-        }
-        let mut it = ln.splitn(4, '|');
-        let title = it.next().unwrap_or("").to_string();
-        let url = it.next().unwrap_or("").to_string();
-        let domain = it.next().unwrap_or("").to_string();
-        let snippet = it.next().unwrap_or("").to_string();
-        if !url.is_empty() {
-            v.push(Res { title, url, domain, snippet });
-        }
-    }
-    if !v.is_empty() {
-        RESULTS = v;
-        STATE = 4;
-    }
 }
 
 unsafe fn parse_article(t: &str) {
@@ -258,7 +171,6 @@ pub fn draw(now: f32) {
         let h = fb::HEIGHT as i32;
 
         match STATE {
-            4 => draw_results(x, y, w, h),
             5 => draw_article(x, y, w, h, now),
             _ => draw_answer(x, y, w, now),
         }
@@ -269,10 +181,6 @@ unsafe fn draw_answer(x: i32, y: i32, w: i32, now: f32) {
     let text: Vec<String> = match STATE {
         1 => alloc::vec!["recherche...".to_string()],
         3 => alloc::vec!["pas de reponse directe - ouvert dans Firefox".to_string()],
-        6 => alloc::vec![
-            "limite gratuite Google atteinte pour aujourd'hui".to_string(),
-            "(reprend demain) - recherche ouverte dans Firefox".to_string(),
-        ],
         _ => {
             let cols = ((w - 72) / font::width_scaled("m", 2).max(1)) as usize;
             let mut out: Vec<String> = Vec::new();
@@ -307,36 +215,6 @@ unsafe fn draw_answer(x: i32, y: i32, w: i32, now: f32) {
     }
     if STATE == 1 && ((now * 2.0) as i32) % 2 == 0 {
         font::draw_str_scaled(x + pad + 12 + font::width_scaled(&text[0], 2) + 6, cy - line_h, "_", ACCENT, 2);
-    }
-}
-
-const ROW_H: i32 = 84;
-
-unsafe fn draw_results(x: i32, y: i32, w: i32, screen_h: i32) {
-    let pad = 24;
-    ROW_N = RESULTS.len().min(8);
-    let h = (pad * 2 + 34 + ROW_N as i32 * ROW_H).min(screen_h - y - 20);
-
-    fb::fill_rect(x - 2, y - 2, w + 4, h + 4, DIM);
-    fb::fill_rect(x, y, w, h, BG);
-    fb::fill_rect(x, y, 4, h, ACCENT);
-
-    let mut cy = y + pad;
-    font::draw_str_scaled(x + pad + 12, cy, "RESULTATS", DIM, 2);
-    let close = "Fermer  (Echap)";
-    let cw = font::width_scaled(close, 2);
-    font::draw_str_scaled(x + w - pad - cw, cy, close, DIM, 2);
-    cy += 34;
-
-    for (i, r) in RESULTS.iter().take(8).enumerate() {
-        ROW_Y[i] = cy;
-        fit(x + pad + 12, cy, x + w - pad, &r.title, ACCENT);
-        fit(x + pad + 12, cy + 26, x + w - pad, &r.domain, DIM);
-        fit(x + pad + 12, cy + 50, x + w - pad, &r.snippet, TXT);
-        if i + 1 < ROW_N.min(8) {
-            fb::fill_rect(x + pad, cy + ROW_H - 12, w - pad * 2, 1, DIM);
-        }
-        cy += ROW_H;
     }
 }
 
@@ -391,23 +269,6 @@ pub fn on_click(mx: i32, my: i32) -> bool {
             return true;
         }
         match STATE {
-            4 => {
-                // clic « Fermer » (bandeau haut)
-                if my >= y + 24 - 8 && my < y + 24 + 20 {
-                    dismiss();
-                    return true;
-                }
-                for i in 0..ROW_N {
-                    if my >= ROW_Y[i] - 10 && my < ROW_Y[i] + ROW_H - 12 {
-                        if let Some(r) = RESULTS.get(i) {
-                            let url = r.url.clone();
-                            request_open(&url);
-                        }
-                        return true;
-                    }
-                }
-                true
-            }
             5 => {
                 let pad = 24;
                 let by = y + pad + 30; // ligne des boutons (sous le titre)
