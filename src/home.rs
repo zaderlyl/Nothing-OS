@@ -341,9 +341,10 @@ pub fn run(mut brain: asti::Brain) -> ! {
     let mut last = time::now_secs();
     let mut click_latch = false;
     let mut drag: Option<shelf::Kind> = None; // friandise en cours de glissement
-    let mut asti_press = false; // clic démarré sur Asti, sans friandise (= caresse)
+    let mut asti_press = false; // clic démarré sur Asti, sans friandise en jeu
     let mut pet_streak: u32 = 0;
-    let mut pet_streak_t = -10.0_f32;
+    let mut pet_streak_t = -10.0_f32; // clics rapprochés (caresse) -> gaga
+    let mut last_asti_click = -10.0_f32; // pour détecter le double-clic (astuce)
     let mut sync_t = last;
 
     loop {
@@ -584,13 +585,30 @@ pub fn run(mut brain: asti::Brain) -> ! {
                     shelf::restore(kind);
                 }
             } else if asti_press && over_asti {
-                // caresse (pas de friandise en jeu) : clics rapprochés → gaga
-                pet_streak = if now - pet_streak_t < 2.2 { pet_streak + 1 } else { 1 };
-                pet_streak_t = now;
-                if pet_streak >= 3 {
-                    brain.react(asti::Pose::Love, 2.6, now);
+                if now - last_asti_click < 0.32 {
+                    // double-clic (pas de friandise) : une astuce au hasard,
+                    // prioritaire sur la caresse
+                    const TRICKS: [asti::Pose; 3] = [asti::Pose::Spin, asti::Pose::Flip, asti::Pose::Wiggle];
+                    let trick = TRICKS[(now * 1000.0) as usize % TRICKS.len()];
+                    let dur = match trick {
+                        asti::Pose::Spin => 1.1,
+                        asti::Pose::Flip => 1.3,
+                        _ => 2.2,
+                    };
+                    brain.react(trick, dur, now);
+                    last_asti_click = -10.0; // absorbe un 3e clic rapproché
+                    pet_streak = 0;
                 } else {
-                    brain.react(asti::Pose::Purr, 1.9, now);
+                    // clic simple : caresse ; des clics rapprochés (sans
+                    // constituer un double-clic) → gaga
+                    pet_streak = if now - pet_streak_t < 2.2 { pet_streak + 1 } else { 1 };
+                    pet_streak_t = now;
+                    last_asti_click = now;
+                    if pet_streak >= 3 {
+                        brain.react(asti::Pose::Love, 2.6, now);
+                    } else {
+                        brain.react(asti::Pose::Purr, 1.9, now);
+                    }
                 }
             }
             asti_press = false;
