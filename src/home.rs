@@ -341,6 +341,8 @@ pub fn run(mut brain: asti::Brain) -> ! {
     let mut last = time::now_secs();
     let mut click_latch = false;
     let mut drag: Option<shelf::Kind> = None; // friandise en cours de glissement
+    let mut asti_press = false; // clic démarré sur Asti, sans friandise en jeu
+    let mut last_asti_click = -10.0_f32; // pour détecter le double-clic (astuce)
     let mut sync_t = last;
 
     loop {
@@ -567,6 +569,9 @@ pub fn run(mut brain: asti::Brain) -> ! {
                 drag = Some(kind);
             }
         }
+        if pressed && over_asti && drag.is_none() {
+            asti_press = true;
+        }
         if !m.left && click_latch {
             // relâché : sur Asti → on nourrit, sinon la friandise revient
             if let Some(kind) = drag.take() {
@@ -577,7 +582,21 @@ pub fn run(mut brain: asti::Brain) -> ! {
                 } else {
                     shelf::restore(kind);
                 }
+            } else if asti_press && over_asti && now - last_asti_click < 0.32 {
+                // double-clic sur Asti (pas de friandise) : une astuce au hasard
+                const TRICKS: [asti::Pose; 3] = [asti::Pose::Spin, asti::Pose::Flip, asti::Pose::Wiggle];
+                let trick = TRICKS[(now * 1000.0) as usize % TRICKS.len()];
+                let dur = match trick {
+                    asti::Pose::Spin => 1.1,
+                    asti::Pose::Flip => 1.3,
+                    _ => 2.2,
+                };
+                brain.react(trick, dur, now);
+                last_asti_click = -10.0; // absorbe un 3e clic rapproché
+            } else if asti_press && over_asti {
+                last_asti_click = now;
             }
+            asti_press = false;
         }
         click_latch = m.left;
 

@@ -296,6 +296,7 @@ enum Extra {
     Excl(f32, f32),
     Steam(f32, f32, f32),
     Hand(f32, f32, f32),
+    Whirl(f32),
 }
 
 struct Extras {
@@ -374,6 +375,19 @@ fn draw_extra(cv: &mut Canvas, e: Extra, _t: f32, b: f32) {
         Extra::Hand(cx, cy, off) => {
             cv.disc(cx + BODY_H * 0.95, cy + off, 1.4, b);
         }
+        Extra::Whirl(p) => {
+            for i in 0..6 {
+                let a = -p * 13.0 - i as f32 * 0.42;
+                cv.stroke(
+                    CENTER + cosf(a) * (BODY_H + 1.2),
+                    CENTER + sinf(a) * (BODY_H + 1.2),
+                    CENTER + cosf(a + 0.5) * (BODY_H + 1.2),
+                    CENTER + sinf(a + 0.5) * (BODY_H + 1.2),
+                    0.32,
+                    b * (0.55 - i as f32 * 0.08),
+                );
+            }
+        }
     }
 }
 
@@ -419,6 +433,10 @@ pub enum Pose {
     Alert,
     Sad,
     Grumpy,
+    // astuces (double-clic sur Asti)
+    Spin,
+    Flip,
+    Wiggle,
     // humeurs "application" (tenues tant que la fenêtre est au 1er plan)
     AppCode,
     AppTerm,
@@ -695,6 +713,34 @@ pub fn draw_creature(cv: &mut Canvas, s: &State, t: f32) {
                 mouth = Mouth::Flat;
                 tilt = wave(t, 0.6) * 0.15;
                 bright = 0.8;
+            }
+            // --- astuces (double-clic sur Asti) ---
+            Pose::Spin => {
+                let q = (t % 1.1) / 1.1;
+                tilt = q * PI * 2.0;
+                eye = EyeStyle::Sparkle;
+                mouth = Mouth::Grin;
+                cy -= sinf(q * PI) * 3.0;
+                ex.push(Extra::Whirl(t));
+            }
+            Pose::Flip => {
+                let q = (t % 1.3) / 1.3;
+                let jump = sinf((q / 0.78).min(1.0) * PI);
+                cy -= jump * 8.0;
+                tilt = (if q < 0.78 { q / 0.78 } else { 1.0 }) * PI * 2.0;
+                eye = if q < 0.7 { EyeStyle::Wide } else { EyeStyle::Arc };
+                mouth = Mouth::O;
+            }
+            Pose::Wiggle => {
+                eye = EyeStyle::Arc;
+                mouth = Mouth::Grin;
+                blush = true;
+                cx += sinf(t * 12.0) * 1.7;
+                tilt = sinf(t * 12.0) * 0.18;
+                cy -= fabsf(sinf(t * 6.0)) * 0.6;
+                if (t % 0.5) > 0.3 {
+                    ex.push(Extra::Note(cx + 6.0, cy - BODY_H - 1.0 - ((t * 2.0) % 3.0)));
+                }
             }
             // --- humeurs "application" (portées de engine.js) ---
             Pose::AppCode => {
