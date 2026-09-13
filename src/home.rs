@@ -595,7 +595,7 @@ pub fn run(mut brain: asti::Brain) -> ! {
                         asti::Pose::Flip => 1.3,
                         _ => 2.2,
                     };
-                    brain.react(trick, dur, now);
+                    brain.react(trick, dur, now, asti::Priority::Trick);
                     last_asti_click = -10.0; // absorbe un 3e clic rapproché
                     pet_streak = 0;
                 } else {
@@ -605,9 +605,9 @@ pub fn run(mut brain: asti::Brain) -> ! {
                     pet_streak_t = now;
                     last_asti_click = now;
                     if pet_streak >= 3 {
-                        brain.react(asti::Pose::Love, 2.6, now);
+                        brain.react(asti::Pose::Love, 2.6, now, asti::Priority::Action);
                     } else {
-                        brain.react(asti::Pose::Purr, 1.9, now);
+                        brain.react(asti::Pose::Purr, 1.9, now, asti::Priority::Action);
                     }
                 }
             }

@@ -1093,6 +1093,27 @@ impl Rng {
     }
 }
 
+/// Priorité d'une réaction (couche 3, via `Brain::react`).
+///
+/// Avant ça, chaque appel à `react()` écrasait la réaction en cours sans
+/// condition : un clic malheureux pendant une pirouette la coupait net,
+/// et une humeur spontanée aurait pu (en théorie) interrompre une
+/// dégustation. `update()` protège déjà les niveaux macro (réaction >
+/// humeur d'appli > repos) par son ordre de retour anticipé ; `Priority`
+/// affine le niveau micro, *à l'intérieur* d'une réaction : une réaction
+/// en cours ne peut être coupée que par une priorité strictement plus
+/// haute — à priorité égale ou inférieure, l'appel est ignoré et
+/// l'animation en cours va jusqu'au bout.
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
+pub enum Priority {
+    /// Petites humeurs spontanées, aucun signal réel ne l'a demandé.
+    Ambient,
+    /// Action délibérée mais "douce" : nourrir, caresser.
+    Action,
+    /// Le geste le plus volontaire : double-clic pour une astuce.
+    Trick,
+}
+
 /// Friandise → pose de dégustation + durée.
 pub fn feed_pose(kind: crate::shelf::Kind) -> (Pose, f32) {
     use crate::shelf::Kind::*;
@@ -1118,6 +1139,7 @@ pub struct Brain {
     last_t: f32,
     react: Option<Pose>,
     react_until: f32,
+    react_priority: Priority,
     scene_next: f32,
     mode: Mode,
     app_pose: Option<Pose>,
@@ -1135,16 +1157,24 @@ impl Brain {
             last_t: 0.0,
             react: None,
             react_until: 0.0,
+            react_priority: Priority::Ambient,
             scene_next: 12.0,
             mode: Mode::Day,
             app_pose: None,
         }
     }
 
-    /// Déclenche une pose de réaction (couche 3) pour `dur` secondes.
-    pub fn react(&mut self, pose: Pose, dur: f32, now: f32) {
+    /// Déclenche une pose de réaction (couche 3) pour `dur` secondes, à la
+    /// priorité `priority`. Sans effet si une réaction plus prioritaire est
+    /// encore en cours (voir `Priority`).
+    pub fn react(&mut self, pose: Pose, dur: f32, now: f32, priority: Priority) {
+        let busy = self.react.is_some() && now < self.react_until;
+        if busy && priority <= self.react_priority {
+            return;
+        }
         self.react = Some(pose);
         self.react_until = now + dur;
+        self.react_priority = priority;
     }
 
     /// Humeur tenue tant qu'une appli est au premier plan (`None` = repos).
@@ -1154,7 +1184,7 @@ impl Brain {
 
     pub fn react_feed(&mut self, kind: crate::shelf::Kind, now: f32) {
         let (pose, dur) = feed_pose(kind);
-        self.react(pose, dur, now);
+        self.react(pose, dur, now, Priority::Action);
         self.energy = (self.energy + 0.12).min(1.15);
     }
 
@@ -1242,7 +1272,7 @@ impl Brain {
                     Pose::Dizzy,
                 ]);
                 let d = self.rng.range(1.8, 3.0);
-                self.react(m, d, now);
+                self.react(m, d, now, Priority::Ambient);
             }
         }
 
