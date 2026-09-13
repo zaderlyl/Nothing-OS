@@ -64,7 +64,8 @@ Un clic sur un **dossier** du partage y descend ; le **fil d'Ariane**
 
 À gauche, une barre latérale cachée (tâches, résumé, heure) qui glisse au
 frôlement du bord. En haut à droite, **Asti** — le compagnon, un portage
-du moteur de « PC Pet ». Asti reste **au-dessus de toutes les fenêtres**
+du moteur de [« PC Pet »](https://github.com/zaderlyl/pc-pet) (dépôt
+séparé ; les deux évoluent indépendamment). Asti reste **au-dessus de toutes les fenêtres**
 et adopte l'humeur + la teinte de l'appli au premier plan. Son étagère de
 friandises se déplie au survol ; un bouton « i » y ouvre PC Pet Hub.
 
