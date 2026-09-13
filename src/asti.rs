@@ -296,6 +296,7 @@ enum Extra {
     Excl(f32, f32),
     Steam(f32, f32, f32),
     Hand(f32, f32, f32),
+    Pat(f32, f32, f32),
 }
 
 struct Extras {
@@ -374,6 +375,13 @@ fn draw_extra(cv: &mut Canvas, e: Extra, _t: f32, b: f32) {
         Extra::Hand(cx, cy, off) => {
             cv.disc(cx + BODY_H * 0.95, cy + off, 1.4, b);
         }
+        Extra::Pat(cx, cy, p) => {
+            let y = cy - BODY_H - 1.4 + fabsf(sinf(p * 7.0)) * 1.8;
+            cv.disc(cx, y + 1.0, 1.4, b);
+            for i in -1..=1 {
+                cv.disc(cx + i as f32 * 1.15, y - 0.5, 0.5, b);
+            }
+        }
     }
 }
 
@@ -419,6 +427,7 @@ pub enum Pose {
     Alert,
     Sad,
     Grumpy,
+    Purr,
     // humeurs "application" (tenues tant que la fenêtre est au 1er plan)
     AppCode,
     AppTerm,
@@ -695,6 +704,19 @@ pub fn draw_creature(cv: &mut Canvas, s: &State, t: f32) {
                 mouth = Mouth::Flat;
                 tilt = wave(t, 0.6) * 0.15;
                 bright = 0.8;
+            }
+            // caresse (clic simple sur Asti) : il ronronne
+            Pose::Purr => {
+                eye = EyeStyle::Arc;
+                mouth = Mouth::Cat;
+                blush = true;
+                cx += sinf(t * 26.0) * 0.32;
+                cy += sinf(t * 13.0) * 0.12;
+                tilt = sinf(t * 3.0) * 0.05;
+                ex.push(Extra::Pat(cx, cy, t));
+                if (t % 0.85) > 0.5 {
+                    ex.push(Extra::Heart(cx + 5.5, cy - BODY_H - 1.0 - ((t * 2.0) % 3.0)));
+                }
             }
             // --- humeurs "application" (portées de engine.js) ---
             Pose::AppCode => {
