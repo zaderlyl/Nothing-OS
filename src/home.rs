@@ -341,6 +341,9 @@ pub fn run(mut brain: asti::Brain) -> ! {
     let mut last = time::now_secs();
     let mut click_latch = false;
     let mut drag: Option<shelf::Kind> = None; // friandise en cours de glissement
+    let mut asti_press = false; // clic démarré sur Asti, sans friandise (= caresse)
+    let mut pet_streak: u32 = 0;
+    let mut pet_streak_t = -10.0_f32;
     let mut sync_t = last;
 
     loop {
@@ -567,6 +570,9 @@ pub fn run(mut brain: asti::Brain) -> ! {
                 drag = Some(kind);
             }
         }
+        if pressed && over_asti && drag.is_none() {
+            asti_press = true;
+        }
         if !m.left && click_latch {
             // relâché : sur Asti → on nourrit, sinon la friandise revient
             if let Some(kind) = drag.take() {
@@ -577,7 +583,17 @@ pub fn run(mut brain: asti::Brain) -> ! {
                 } else {
                     shelf::restore(kind);
                 }
+            } else if asti_press && over_asti {
+                // caresse (pas de friandise en jeu) : clics rapprochés → gaga
+                pet_streak = if now - pet_streak_t < 2.2 { pet_streak + 1 } else { 1 };
+                pet_streak_t = now;
+                if pet_streak >= 3 {
+                    brain.react(asti::Pose::Love, 2.6, now);
+                } else {
+                    brain.react(asti::Pose::Purr, 1.9, now);
+                }
             }
+            asti_press = false;
         }
         click_latch = m.left;
 
