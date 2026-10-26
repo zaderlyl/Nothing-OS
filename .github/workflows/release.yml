@@ -1,0 +1,31 @@
+name: Release
+
+# Un tag `v*` (ex. v0.1.0) compile le noyau et publie une Release
+# contenant kernel.bin et lancer.sh.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer les outils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm lld clang
+          rustup default stable
+          rustup target add x86_64-unknown-linux-gnu
+
+      - name: Compiler le noyau
+        run: make
+
+      - name: Publier la Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" kernel.bin lancer.sh --title "$GITHUB_REF_NAME" --generate-notes
