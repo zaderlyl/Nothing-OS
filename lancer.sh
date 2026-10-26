@@ -3,6 +3,7 @@
 # téléchargé depuis la page Releases, ou compilé avec `make`).
 #
 #   ./lancer.sh
+#   SHARE=~/Music ./lancer.sh    # expose un dossier à l'OS (/doc, /fichier)
 set -e
 cd "$(dirname "$0")"
 
@@ -29,8 +30,17 @@ else
     AUDIO="pa,id=snd"
 fi
 
+# partage de dossier (optionnel) : virtio-9p, voir le Makefile
+SHARE_OPT=()
+if [ -n "$SHARE" ]; then
+    [ -d "$SHARE" ] || { echo "dossier introuvable : $SHARE"; exit 1; }
+    SHARE_OPT=(-fsdev local,id=fsdev0,path="$SHARE",security_model=none
+               -device virtio-9p-pci,fsdev=fsdev0,mount_tag=hostdocs,disable-modern=on)
+fi
+
 exec "$QEMU" -kernel "$KERNEL" -vga std $DISPLAY_OPT \
     -usb -device usb-tablet \
     -drive file="$DISK",format=raw,if=ide,index=0 \
+    "${SHARE_OPT[@]}" \
     -audiodev "$AUDIO" -device AC97,audiodev=snd \
     -m 1G -no-reboot -no-shutdown -rtc base=localtime

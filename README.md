@@ -159,7 +159,7 @@ tout le bricolage `memcpy`/`eh_personality`.
    ./lancer.sh
    ```
 
-Cette voie ouvre l'OS seul : le partage de dossier avec le Mac et les apps (`/app`) demandent de construire le projet (voir plus bas).
+Pour partager un dossier avec l'OS (documents, musique pour `/doc`) : `SHARE=~/Music ./lancer.sh`. Les apps du Mac (`/app`) demandent de construire le projet (voir plus bas).
 
 ## Construire et lancer
 
