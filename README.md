@@ -149,6 +149,18 @@ add rust-src`, une target JSON custom (`x86_64-nothing_os.json`) et
 `cargo build -Z build-std=core,alloc`. C'est plus propre et ça enlève
 tout le bricolage `memcpy`/`eh_personality`.
 
+## Essayer sans compiler
+
+1. Installer QEMU : `brew install qemu` (macOS) ou `sudo apt install qemu-system-x86` (Linux).
+2. Télécharger `kernel.bin` et `lancer.sh` depuis la page [Releases](../../releases/latest), dans le même dossier.
+3. Lancer :
+   ```bash
+   chmod +x lancer.sh
+   ./lancer.sh
+   ```
+
+Cette voie ouvre l'OS seul : le partage de dossier avec le Mac et les apps (`/app`) demandent de construire le projet (voir plus bas).
+
 ## Construire et lancer
 
 QEMU charge l'ELF64 directement via la *note PVH* (`qemu -kernel ...`),
